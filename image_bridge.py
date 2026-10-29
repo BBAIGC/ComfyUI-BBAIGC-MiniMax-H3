@@ -176,29 +176,44 @@ def reference_role_prompt(prompt, reference_count, reference_roles=None):
     if (not isinstance(reference_count, int) or isinstance(reference_count, bool)
             or not 1 <= reference_count <= MAX_REFERENCES):
         raise ValueError("Image2.1参考图数量应为1～16。")
-    roles = ("图像1是主参考。环境、光线、色彩与图像1一致，不附加调色。"
-             "本镜明确要求改变环境时，以该明确变更要求为准。")
+    roles = ("<image1>是主参考。仅保持本镜未要求修改的背景、照明与整体色调。"
+             "人物衣着、颜色、姿态、物件状态和构图以本镜正文的明确要求为准；"
+             "本镜要求改变环境时也按正文执行，各参考图只提供被指定的用途。")
     if reference_roles is not None:
         if not isinstance(reference_roles, list) or not reference_roles or len(reference_roles) > MAX_REFERENCES + 1:
             raise ValueError("参考图角色映射无效。")
         mappings = []
+        source_slots = {}
         for entry in reference_roles:
             if (not isinstance(entry, dict) or entry.get("role") not in ("primary", "previous_storyboard", "additional")
                     or type(entry.get("slot")) is not int or not 1 <= entry["slot"] <= reference_count
                     or not isinstance(entry.get("source_id"), str)
                     or not re.fullmatch(r"(?:图|分镜)[1-9]\d*|结束帧", entry["source_id"])):
                 raise ValueError("参考图角色或输入槽编号无效。")
+            prior_slot = source_slots.setdefault(entry["source_id"], entry["slot"])
+            if prior_slot != entry["slot"]:
+                raise ValueError("同一参考图来源不能映射到多个输入槽，请重新规划参考图。")
             source = ("上一" if entry["role"] == "previous_storyboard" else "用户素材") + entry["source_id"]
             if isinstance(entry.get("description"), str) and entry["description"].strip():
                 source += "（" + re.sub(r"\s+", " ", entry["description"].strip())[:160] + "）"
             role = {"primary": "主参考与环境基准", "previous_storyboard": "相邻分镜几何与状态参考",
                     "additional": "附加身份、物体与细节参考"}[entry["role"]]
-            mappings.append(f"{source}→输入图像{entry['slot']}（{role}）")
+            mappings.append(f"{source}→<image{entry['slot']}>（{role}）")
         if not any(entry["role"] == "primary" and entry["slot"] == 1 for entry in reference_roles):
             raise ValueError("输入图像1缺少主参考角色。")
         roles += "输入图像对应关系：" + "；".join(mappings) + "。"
+        # Source labels in planner prose are library IDs, not encoder slot IDs.
+        # Replace only complete, declared labels in one pass; unknown labels stay
+        # untouched rather than being guessed from their displayed number.
+        source_pattern = r"(?<![A-Za-z0-9@])@?(?:(?:用户)?素材|参考)?(?:图[1-9]\d*|分镜[1-9]\d*|结束帧)(?!\d)"
+        def source_slot(match):
+            token = match.group(0)
+            identity = re.sub(r"^@?(?:(?:用户)?素材|参考)?", "", token)
+            slot = source_slots.get(identity)
+            return f"<image{slot}>" if slot is not None else token
+        prompt = re.sub(source_pattern, source_slot, prompt)
         if any(entry["role"] == "previous_storyboard" for entry in reference_roles):
-            roles += ("上一分镜图只提供结构、几何关系和状态；人物身份细节、自然皮肤纹理、发丝、衣料和色彩以原始用户素材为准。"
+            roles += ("上一分镜图只提供结构、几何关系和状态；人物身份与未要求修改的自然细节以指定用户素材为准，衣着和颜色按本镜正文的明确要求。"
                       "不复制上一分镜的模糊、磨皮或细节损失。"
                       "它是上一镜的开始画面，"
                       "不代表上一镜动作之后的结束状态。本镜开场状态、实体状态账本和明确环境要求优先，"

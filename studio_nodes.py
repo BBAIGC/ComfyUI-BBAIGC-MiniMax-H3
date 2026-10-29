@@ -1436,8 +1436,7 @@ class H3StoryboardStudio:
                         generated = generate_reference(scene["image_prompt"], context["paths"][0], width, height,
                                                        seed=(int(kwargs["随机种子"]) + i) % 2**32,
                                                        reference_paths=context["paths"], reference_roles=context["roles"],
-                                                       settings=({**image_settings, "previous_reference_policy": "完整参考（兼容）"}
-                                                                 if previous_image and reference_upscale["enabled"] else image_settings),
+                                                       settings=image_settings,
                                                        storyboard=True,
                                                        progress_callback=_image_job_progress(manifest, node_id, active_image_job))
                         scene["generated_image_path"] = generated
@@ -1490,8 +1489,7 @@ class H3StoryboardStudio:
                         generated = generate_reference(final_prompt, context["paths"][0], width, height,
                                                        seed=(int(kwargs["随机种子"]) + len(durations)) % 2**32,
                                                        reference_paths=context["paths"], reference_roles=context["roles"],
-                                                       settings=({**image_settings, "previous_reference_policy": "完整参考（兼容）"}
-                                                                 if reference_upscale["enabled"] else image_settings),
+                                                       settings=image_settings,
                                                        storyboard=True,
                                                        progress_callback=_image_job_progress(manifest, node_id, active_image_job))
                         manifest["final_generated_image_path"] = generated

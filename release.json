@@ -1,11 +1,11 @@
 {
   "id": "h3",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "author": "BBAIGC",
-  "workflow": "workflows/BBAIGC_h3_V1.2.4.json",
-  "sha256": "e02f979b312781c9ef14f745ba81c654c34a97449a1ecc4684a094d3839a3a98",
+  "workflow": "workflows/BBAIGC_h3_V1.2.5.json",
+  "sha256": "af8c24ac2137e17475cd7daa3427888e9f009f245f07a41ced7ec69bf6a8a732",
   "node_versions": {
-    "core": "1.2.4"
+    "core": "1.2.5"
   },
-  "notes": "H3 中英文参考图自动识别、稳定绑定与保存恢复、缺失引用点击重选；首页突出全本地自动分镜到成片。"
+  "notes": "修正多参考图槽位与镜头指令优先级；开启超分不再覆盖结构参考策略。"
 }

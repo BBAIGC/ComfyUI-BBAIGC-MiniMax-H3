@@ -616,9 +616,16 @@ class CodexQwenStudioRepair:
             '输出尺寸': (['跟随输入', '原图', '1K', '2K', '自定义'], {'default': '跟随输入',
                        'tooltip': '跟随输入采用限长边后的尺寸；原图采用最初输入尺寸；1K/2K按原比例设置修复画布。'}),
             '输出长边': ('INT', {'default': 1024, 'min': 256, 'max': 4096, 'step': 32}),
+            'DLSS倍率': ([1, 2], {'default': 2, 'tooltip': '先以所选倍率保真增强，再按修复输出尺寸等比适配；不会追加VOSR或扩散重绘。'}),
+            'DLSS强度': ('FLOAT', {'default': 1.0, 'min': 0.0, 'max': 2.0, 'step': 0.05}),
+            'DLSS色调': ('FLOAT', {'default': 1.0, 'min': 0.0, 'max': 2.0, 'step': 0.05}),
+            'DLSS结构': ('FLOAT', {'default': 1.5, 'min': 0.0, 'max': 2.0, 'step': 0.05}),
+            'DLSS皮肤': ('FLOAT', {'default': -1.0, 'min': -1.0, 'max': 2.0, 'step': 0.05}),
+            'DLSS细节': ('FLOAT', {'default': 1.0, 'min': 0.0, 'max': 2.0, 'step': 0.05}),
+            'DLSS色彩': ('FLOAT', {'default': 1.0, 'min': 0.0, 'max': 1.0, 'step': 0.05}),
         }
         return {'required': {'图像': ('IMAGE',), '启用修复': ('BOOLEAN', {'default': False}),
-                             '修复引擎': (['Image2.1', 'Krea 2'], {'default': 'Image2.1'}),
+                             '修复引擎': (['Image2.1', 'Krea 2', 'DLSS5'], {'default': 'Image2.1'}),
                              '修复规则': ('STRING', {'default': REPAIR_RULE, 'multiline': True}),
                              '补充要求': ('STRING', {'default': '', 'multiline': True}),
                              '种子': ('INT', {'default': 42, 'min': 0, 'max': 2**32 - 1})}, 'optional': optional}
@@ -627,7 +634,7 @@ class CodexQwenStudioRepair:
     RETURN_NAMES = ('修复或直通图像', '修复已启用')
     FUNCTION = 'repair'
     CATEGORY = 'Codex/Qwen工作台'
-    DESCRIPTION = 'Image2.1原图编辑条件与低降噪修复；Krea 2原图潜空间重绘。修复采用独立参数，关闭时不读取或加载任何修复权重。'
+    DESCRIPTION = 'Image2.1低降噪编辑、Krea 2低降噪重绘或DLSS5保真增强。DLSS5不使用扩散模型或修复提示词；关闭时不读取或加载修复权重。'
 
     def check_lazy_status(self, 启用修复=False, 修复引擎='Image2.1', 使用外接配置=False, **kwargs):
         return ['Image2配置'] if (启用修复 and 修复引擎 == 'Image2.1' and 使用外接配置 and
@@ -638,6 +645,11 @@ class CodexQwenStudioRepair:
         if not kwargs.get('启用修复'):
             return _cache_key('qwen-studio-repair-v4-disabled')
         engine = kwargs.get('修复引擎', 'Image2.1')
+        if engine == 'DLSS5':
+            from .reference_upscale import _identity
+            return _cache_key('qwen-studio-repair-dlss-v1', kwargs,
+                              _identity(Path(__file__).with_name('isolated_dlss.py'), True),
+                              _identity(Path(__file__).with_name('dlss_worker.py'), True))
         if engine == 'Image2.1' and kwargs.get('使用外接配置'):
             from .image_bridge import normalize_settings
             cfg = normalize_settings(kwargs.get('Image2配置'))
@@ -658,17 +670,23 @@ class CodexQwenStudioRepair:
                Krea模型='krea2_turbo_fp8_scaled.safetensors', Krea编码器='qwen3vl_4b_fp8_scaled.safetensors',
                KreaVAE='qwen_image_vae.safetensors', Krea步数=8, KreaCFG=1.0, Krea采样器='euler',
                Krea调度器='simple', Krea降噪=0.3, Krea编码器设备='default', 负面提示词='',
-               输入尺寸='2K', 输入长边=2048, 输出尺寸='跟随输入', 输出长边=1024, **legacy):
+               输入尺寸='2K', 输入长边=2048, 输出尺寸='跟随输入', 输出长边=1024,
+               DLSS倍率=2, DLSS强度=1.0, DLSS色调=1.0, DLSS结构=1.5,
+               DLSS皮肤=-1.0, DLSS细节=1.0, DLSS色彩=1.0, **legacy):
         if not 启用修复:
             return (图像, False)
         _image(图像, '修复输入')
-        if 修复引擎 not in ('Image2.1', 'Krea 2'):
-            raise ValueError('请选择Image2.1或Krea 2修复引擎；MOSS修复已移除。')
+        if 修复引擎 not in ('Image2.1', 'Krea 2', 'DLSS5'):
+            raise ValueError('请选择Image2.1、Krea 2或DLSS5修复引擎；MOSS修复已移除。')
         original = 图像
         prepared = resize_input(图像, 输入尺寸, 输入长边)
         dimensions = input_dimensions(original, prepared)
         width, height = self._canvas(original, prepared, 输出尺寸, 输出长边)
         dimensions.update(output_width=width, output_height=height, output_size=输出尺寸)
+        if 修复引擎 == 'DLSS5':
+            return self._dlss_repair(prepared, width, height, dimensions,
+                                     DLSS倍率, DLSS强度, DLSS色调, DLSS结构,
+                                     DLSS皮肤, DLSS细节, DLSS色彩)
         from .image_bridge import normalize_settings
         if 修复引擎 == 'Image2.1':
             cfg = normalize_settings(Image2配置 if 使用外接配置 else {
@@ -743,6 +761,76 @@ class CodexQwenStudioRepair:
             raise RuntimeError(f'修复输出尺寸异常：预期{width}×{height}，实际{image.shape[2]}×{image.shape[1]}。')
         return self._preview(load_tensor(_save_cached(image, key)), dimensions=dimensions)
 
+    @classmethod
+    def _dlss_repair(cls, image, width, height, dimensions, scale, intensity, tone, structure, skin, detail, color):
+        import inspect
+        import math
+        import uuid
+        import comfy.model_management as mm
+        from comfy.utils import common_upscale
+        from .reference_upscale import _node, _identity, _size, DLSS_MODES
+        from .isolated_dlss import run_dlss
+        if type(scale) is not int or scale not in (1, 2):
+            raise ValueError('DLSS5修复增强倍率请选择1或2。')
+        for label, value, low, high in (('强度', intensity, 0, 2), ('色调', tone, 0, 2),
+                                        ('结构', structure, 0, 2), ('皮肤', skin, -1, 2),
+                                        ('细节', detail, 0, 2), ('色彩', color, 0, 1)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not low <= value <= high:
+                raise ValueError(f'DLSS5{label}需为{low}～{high}的有限数值。')
+        node = _node('RH_DLSS5Enhance')
+        plugin = Path(inspect.getfile(node)).parent
+        module = sys.modules.get(node.__module__)
+        common = getattr(module, 'common', None)
+        if common is None:
+            raise RuntimeError('DLSS5接口不兼容，请检查已安装的DLSS5节点。')
+        runtime = Path(common.resolve_runtime_dir(''))
+        common.check_runtime_files(runtime, scale)
+        files = sorted(runtime.glob('*.dll')) + sorted((runtime / 'caller').glob('*.dll'))
+        files.append(plugin / 'native/bin/dlss5nr_bridge.dll')
+        implementation = [_identity(inspect.getfile(node), True),
+                          _identity(Path(__file__).with_name('isolated_dlss.py'), True),
+                          _identity(Path(__file__).with_name('dlss_worker.py'), True)]
+        implementation += [_identity(path, True) for path in sorted((plugin / 'dlss5nr').glob('*.py'))]
+        implementation += [_identity(path) for path in files]
+        kwargs = {'upscaling_mode': DLSS_MODES[str(scale)], 'style': 'default', 'preset': 0,
+                  'intensity': float(intensity), 'tone': float(tone), 'structure': float(structure),
+                  'skin': float(skin), 'auto_mask': 'on', 'motion': 'auto', 'scene_change_threshold': 0.24,
+                  'batch_mode': 'temporal sequence', 'warmup_frames': 1, 'keep_audio': 'on',
+                  'backend': 'windows-bridge', 'channel_order': 'auto', 'hdr': 'off',
+                  'global_tone': -1.0, 'detail': float(detail), 'color': float(color), 'runtime_dir': '', 'wine_prefix': ''}
+        key = _cache_key('qwen-studio-repair-dlss-v1', image,
+                         {'engine':'DLSS5','config':kwargs,'output':[width,height]}, implementation)
+        dimensions.update(engine='DLSS5', enhancement_scale=scale, diffusion=False,
+                          enhancement_width=int(image.shape[2])*scale, enhancement_height=int(image.shape[1])*scale)
+        cached = _cached_image(key)
+        if cached:
+            dimensions['cache_hit'] = True
+            return cls._preview(load_tensor(cached), dimensions=dimensions)
+        source = tensor_path(image[:, :, :, :3])
+        destination = source.with_name(source.stem + '-dlss-' + uuid.uuid4().hex + '.png')
+        enhanced = None
+        release_resources(full=True)
+        try:
+            run_dlss(source, destination, kwargs, plugin, mm.throw_exception_if_processing_interrupted)
+            expected = (int(image.shape[2])*scale, int(image.shape[1])*scale)
+            actual = _size(destination)
+            if actual != expected:
+                raise RuntimeError(f'DLSS5增强尺寸异常：预期{expected[0]}×{expected[1]}，实际{actual[0]}×{actual[1]}。')
+            enhanced = load_tensor(destination)
+            if not bool(torch.isfinite(enhanced).all()):
+                raise RuntimeError('DLSS5增强返回无效像素，未保存结果。')
+            if tuple(enhanced.shape[1:3]) != (height, width):
+                enhanced = common_upscale(enhanced.movedim(-1,1), width, height, 'lanczos', 'disabled').movedim(1,-1)
+            if tuple(enhanced.shape[1:3]) != (height, width):
+                raise RuntimeError('DLSS5修复输出尺寸不符，未保存结果。')
+            dimensions['cache_hit'] = False
+            return cls._preview(load_tensor(_save_cached(enhanced, key)), dimensions=dimensions)
+        finally:
+            source.unlink(missing_ok=True)
+            destination.unlink(missing_ok=True)
+            enhanced = None
+            release_resources(full=True)
+
     @staticmethod
     def _canvas(original, prepared, size, edge):
         if size not in ('跟随输入', '原图', '1K', '2K', '自定义'):
@@ -776,7 +864,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     'CodexQwenMode': '生成模式与模型路线',
     'CodexQwenStudioReferences': '参考图库',
     'CodexQwenStudioEncoder': 'Qwen文生图与多图编辑编码',
-    'CodexQwenStudioRepair': '修复 · Image2.1 / Krea 2低降噪',
+    'CodexQwenStudioRepair': '修复 · Image2.1 / Krea 2 / DLSS5',
     'CodexStudioLora': '通用LoRA · 匹配当前模型基座',
     'CodexStudioDenoise': '生成模式降噪',
     'CodexStudioMossPrompt': 'MOSS主参考图重绘提示词',

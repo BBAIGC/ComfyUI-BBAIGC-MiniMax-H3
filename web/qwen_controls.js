@@ -145,6 +145,8 @@ function install(node) {
             const engine=field(repair,'修复引擎')?.value;
             if(item.widget.startsWith('Image2')&&engine!=='Image2.1')return false;
             if(item.widget.startsWith('Krea')&&engine!=='Krea 2')return false;
+            if(item.widget.startsWith('DLSS')&&engine!=='DLSS5')return false;
+            if(engine==='DLSS5'&&['修复规则','补充要求','负面提示词','种子','使用外接配置'].includes(item.widget))return false;
             if(item.widget==='使用外接配置'&&engine!=='Image2.1')return false;
             if(['输入长边','输出长边'].includes(item.widget)&&field(repair,item.widget==='输入长边'?'输入尺寸':'输出尺寸')?.value!=='自定义')return false;
         }
@@ -451,6 +453,12 @@ function install(node) {
         mapping=next;mappingKey=config.value;refreshers=[];bindings=[];slots=[];canvasControllers.clear();
         watchRouteCallback();syncOptimizationTarget();
         const fields=(mapping.fields||[]).filter(item=>getField(item));
+        for(const repair of new Set(fields.map(getTarget).filter(owner=>owner?.type==='CodexQwenStudioRepair'))){
+            for(const name of ['DLSS倍率','DLSS强度','DLSS色调','DLSS结构','DLSS皮肤','DLSS细节','DLSS色彩']){
+                if(field(repair,name)&&!fields.some(item=>String(item.node)===String(repair.id)&&item.widget===name))
+                    fields.push({node:repair.id,widget:name,label:name,section:'finish',group:'repair-dlss',group_title:'DLSS5保真增强',condition:{node:repair.id,widget:'修复引擎',equals:'DLSS5'}});
+            }
+        }
         for(const owner of new Set(fields.map(getTarget).filter(owner=>owner?.type==='CodexQwenStudioUpscale'))){const total=field(owner,'总倍率');if(total){total.options||={};total.options.values=field(owner,'超分路线')?.value==='DLSS5→VOSR2'?totalScales('DLSS5→VOSR2'):[1,2,3,4];}}
         const seen=new Set();for(const item of fields){if(item.profile_key){const key=(item.profile_route||'normal')+':'+item.profile_key;if(!seen.has(key)){seen.add(key);bindings.push(item);}}if(item.slot||item.section==='lora'){const slot=String(item.slot||String(item.label).match(/LoRA\s*(\d+)/i)?.[1]||1);if(!slots.includes(slot))slots.push(slot);}}
         slots.sort((a,b)=>Number(a)-Number(b));
@@ -491,7 +499,7 @@ function install(node) {
                 refreshers.push(()=>{const single=['moss','zimage','krea'].includes(route());capability.hidden=!single;capability.textContent=single?'图生图采用单张主图重绘；多图编辑请选择 Qwen 或 BBAPI。':'';});
             }
             if(created&&owner?.type==='CodexQwenStudioRepair'&&item.widget==='修复引擎'){
-                const hint=el('div','qws-status');parent.append(hint);refreshers.push(()=>{hint.textContent=field(owner,'修复引擎')?.value==='Krea 2'?'原图低降噪重绘；建议8步、CFG 1、降噪0.15～0.4。':'保留图片编辑条件，从原图低降噪修复；提高降噪会加大纹理和构图变化。';});
+                const hint=el('div','qws-status');parent.append(hint);refreshers.push(()=>{const engine=field(owner,'修复引擎')?.value;hint.textContent=engine==='DLSS5'?'保真增强，不调用扩散模型或提示词。先增强，再按所选输出尺寸等比适配。':engine==='Krea 2'?'原图低降噪重绘；建议8步、CFG 1、降噪0.15～0.4。':'保留图片编辑条件，从原图低降噪修复；提高降噪会加大纹理和构图变化。';});
             }
             if(created&&['CodexQwenStudioRepair','CodexQwenStudioUpscale'].includes(owner?.type)&&item.widget==='输入尺寸'){
                 const dimensions=el('div','qws-status');parent.append(dimensions);refreshers.push(()=>{const receipt=app.nodeOutputs?.[String(owner.id)]?.codex_input_dimensions?.[0];dimensions.textContent=receipt?`原图 ${receipt.original_width} × ${receipt.original_height} → 处理输入 ${receipt.width} × ${receipt.height}${receipt.output_width?` → 输出 ${receipt.output_width} × ${receipt.output_height}`:''}`:'输入尺寸仅限制长边，不会放大小图。';});
