@@ -175,7 +175,7 @@ def update_nodes(identity):
         raise ValueError('未知工作流')
     custom = Path(__file__).resolve().parent.parent
     repos = [PRODUCTS['h3'][1]]
-    if identity == 'bbapi':
+    if identity in ('image', 'bbapi'):
         repos.append(PRODUCTS['bbapi'][1])
     prepared = []
     for repo in repos:

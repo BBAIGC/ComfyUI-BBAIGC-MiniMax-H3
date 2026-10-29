@@ -1,11 +1,11 @@
 {
   "id": "h3",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "author": "BBAIGC",
-  "workflow": "workflows/BBAIGC_h3_V1.2.2.json",
-  "sha256": "5ab47e5690fbf8eba58e67714f88844736832e7683f504b62922eb1c878e201c",
+  "workflow": "workflows/BBAIGC_h3_V1.2.3.json",
+  "sha256": "c2ea0dc6e6c1e51e3e2d18a39d6b689ad68f3e42312458fe8bbd6fd53a459c7a",
   "node_versions": {
-    "core": "1.2.2"
+    "core": "1.2.3"
   },
-  "notes": "语音自动分段与即时输入、BBAIGC标识、按需模型检查及工作流更新。"
+  "notes": "27B 分镜规划流式接收与取消、剧本语音输入、分镜图替换与续跑、独立版本更新。"
 }
