@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.env*
+installed_versions.json
+*.log
+user/
+input/
+output/
+models/
+.bbaigc-download/
