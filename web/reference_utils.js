@@ -111,24 +111,30 @@ export function reconcileReferences(entries, script, {removedIds = []} = {}) {
 }
 
 
-const PROTECTED_SPEECH = /<d(?:\s[^>]*)?>[\s\S]*?<\/d>|“[^”]*”|「[^」]*」|『[^』]*』|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/gi;
+const PROTECTED_SPEECH = /<d(?:\s[^>]*)?>[\s\S]*?<\/d>|“[^”]*”|「[^」]*」|『[^』]*』|‘[^’]*’|"(?:[^"\\]|\\.)*"|(?<!\w)'(?:[^'\\]|\\.)*'(?!\w)/gi;
 const NUMBER_WORDS = {zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19,twenty:20,thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90};
-const NUMBER_WORD_PATTERN = "(?:"+Object.keys(NUMBER_WORDS).join("|")+"|hundred)";
-const ENGLISH_REFERENCE = new RegExp("\\b(?:picture|image|photo|reference(?: image)?|number)\\s*(?:no\\.?|#)?\\s*(\\d+|"+NUMBER_WORD_PATTERN+"(?:[ -]+(?:and[ -]+)?"+NUMBER_WORD_PATTERN+"){0,4})\\b","gi");
+const SMALL_NUMBER_WORDS=Object.keys(NUMBER_WORDS).filter(word=>NUMBER_WORDS[word]<20);
+const ONES_WORD="(?:"+SMALL_NUMBER_WORDS.filter(word=>NUMBER_WORDS[word]>=1&&NUMBER_WORDS[word]<=9).join("|")+")";
+const BELOW_HUNDRED="(?:"+Object.keys(NUMBER_WORDS).filter(word=>NUMBER_WORDS[word]>=20).join("|")+")(?:[ -]+"+ONES_WORD+")?|(?:"+SMALL_NUMBER_WORDS.sort((a,b)=>b.length-a.length).join("|")+")";
+const ENGLISH_NUMBER="(?:\\d+|(?:(?:"+ONES_WORD+"[ -]+)?hundred)(?:[ -]+(?:and[ -]+)?(?:"+BELOW_HUNDRED+"))?|(?:"+BELOW_HUNDRED+"))";
+const ENGLISH_REFERENCE = new RegExp("(?<![@A-Za-z0-9])@?(?:reference(?:\\s+(?:image|picture|photo))?|picture|image|photo|ref|number)\\s*(?:(?:no\\.?|number)\\s*)?#?\\s*("+ENGLISH_NUMBER+")(?![A-Za-z0-9]|\\s*[x×＊*]\\s*\\d)","gi");
+const CHINESE_REFERENCE=/(?<![@A-Za-z0-9构镜意程])@?(?:参考(?:图片|图像|图)|素材图|图片|图像|图)\s*(\d+|[零〇一二两三四五六七八九十百]+)(?![\dA-Za-z零〇一二两三四五六七八九十百]|\s*[x×＊*]\s*\d)/g;
 function referenceNumber(raw){
     if(/^\d+$/.test(raw))return Number(raw);
-    if(/^[零〇一二两三四五六七八九十百]+$/.test(raw)){const digits={零:0,〇:0,一:1,二:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};let total=0,last=0;for(const char of raw){if(char==="十"||char==="百"){total+=(last||1)*(char==="十"?10:100);last=0;}else last=digits[char];}return total+last;}
+    if(/^[零〇一二两三四五六七八九十百]+$/.test(raw)){const digits={零:0,〇:0,一:1,二:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};if(!/[十百]/.test(raw))return Number([...raw].map(char=>digits[char]).join(''));let total=0,last=0;for(const char of raw){if(char==="十"||char==="百"){total+=(last||1)*(char==="十"?10:100);last=0;}else last=digits[char];}return total+last;}
     let total=0;for(const word of raw.toLowerCase().split(/[ -]+/)){if(word==="and")continue;if(word==="hundred")total=(total||1)*100;else if(word in NUMBER_WORDS)total+=NUMBER_WORDS[word];else return NaN;}return total;
 }
 /** Normalize only explicit material references. Quoted and <d> speech stays verbatim. */
 export function normalizeReferenceMentions(script,count){
     const original=String(script??""),available=Math.max(0,Math.min(101,Number(count)||0));
     const protectedSegments=[];const skeleton=original.replace(PROTECTED_SPEECH,part=>{protectedSegments.push(part);return `\u0000H3S${protectedSegments.length-1}\u0000`;});
-    const canonical=(token,raw)=>{const number=referenceNumber(raw);return number>=1&&number<=available?`@图${number}`:token;};
-    let normalized=skeleton.replace(/(?<!@)(?:参考图|素材图|图片|图像|图)\s*([1-9]\d*|[零〇一二两三四五六七八九十百]+)(?![零〇一二两三四五六七八九十百\d])/g,canonical).replace(ENGLISH_REFERENCE,canonical);
-    const ids=Array.from(new Set(Array.from(normalized.matchAll(/@图([1-9]\d*)/g),match=>Number(match[1])).filter(number=>number<=available)));
-    if(available===1&&!ids.length){normalized=`@图1\n${normalized}`;ids.push(1);}
+    const missing=skeleton.includes('@未引用[');
+    const mentions=[];const canonical=(token,raw)=>{const number=referenceNumber(raw);mentions.push(number);return `@图${number}`;};
+    let normalized=skeleton.replace(CHINESE_REFERENCE,canonical).replace(ENGLISH_REFERENCE,canonical);
+    const ids=Array.from(new Set(mentions.filter(number=>number>=1&&number<=available)));
+    const outOfRange=mentions.some(number=>!Number.isFinite(number)||number<1||number>available);
+    if(available===1&&!mentions.length){normalized=`@图1\n${normalized}`;ids.push(1);}
     normalized=normalized.replace(/\u0000H3S(\d+)\u0000/g,(_,index)=>protectedSegments[Number(index)]);
-    const valid=available<=1||ids.length>0;
-    return {script:normalized,changed:normalized!==original,references:ids.map(number=>`图${number}`),valid,error:valid?"":"有多张参考图，请在剧本中用 @ 指定图片。"};
+    const valid=!missing&&!outOfRange&&(available<=1||ids.length>0);
+    return {script:normalized,changed:normalized!==original,references:ids.map(number=>`图${number}`),valid,error:missing?'剧本含未引用的参考图，请点击红色标记重新选择或删除后再运行。':outOfRange?`参考图编号超出范围；当前只有${available}张参考图。`:valid?"":"有多张参考图，请在剧本中用 @ 指定图片。"};
 }

@@ -1,0 +1,1877 @@
+{
+  "revision": 5,
+  "last_node_id": 43,
+  "last_link_id": 601,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "H3TextModelSettings",
+      "pos": [
+        -500,
+        60
+      ],
+      "size": [
+        430,
+        34
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "模型",
+          "name": "模型",
+          "type": "COMBO",
+          "widget": {
+            "name": "模型"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "温度",
+          "name": "温度",
+          "type": "FLOAT",
+          "widget": {
+            "name": "温度"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "上下文长度",
+          "name": "上下文长度",
+          "type": "INT",
+          "widget": {
+            "name": "上下文长度"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "输出上限",
+          "name": "输出上限",
+          "type": "INT",
+          "widget": {
+            "name": "输出上限"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "top_p",
+          "name": "top_p",
+          "type": "FLOAT",
+          "widget": {
+            "name": "top_p"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "重复惩罚",
+          "name": "重复惩罚",
+          "type": "FLOAT",
+          "widget": {
+            "name": "重复惩罚"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "color_off": "#ffcf40",
+          "color_on": "#ffcf40",
+          "localized_name": "文本模型配置",
+          "name": "文本模型配置",
+          "type": "H3_TEXT_SETTINGS",
+          "slot_index": 0,
+          "links": [
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3TextModelSettings",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        "qwen3.5:9b",
+        0.1,
+        32768,
+        10000,
+        0.9,
+        1.05
+      ]
+    },
+    {
+      "id": 2,
+      "type": "H3ImageModelSettings",
+      "pos": [
+        -500,
+        150
+      ],
+      "size": [
+        430,
+        34
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "图像模型",
+          "name": "图像模型",
+          "type": "COMBO",
+          "widget": {
+            "name": "图像模型"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "文本编码器",
+          "name": "文本编码器",
+          "type": "COMBO",
+          "widget": {
+            "name": "文本编码器"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "VAE",
+          "name": "VAE",
+          "type": "COMBO",
+          "widget": {
+            "name": "VAE"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "步数",
+          "name": "步数",
+          "type": "INT",
+          "widget": {
+            "name": "步数"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "CFG",
+          "name": "CFG",
+          "type": "FLOAT",
+          "widget": {
+            "name": "CFG"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "采样器",
+          "name": "采样器",
+          "type": "COMBO",
+          "widget": {
+            "name": "采样器"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "调度器",
+          "name": "调度器",
+          "type": "COMBO",
+          "widget": {
+            "name": "调度器"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "去噪",
+          "name": "去噪",
+          "type": "FLOAT",
+          "widget": {
+            "name": "去噪"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "缓存设备",
+          "name": "缓存设备",
+          "type": "COMBO",
+          "widget": {
+            "name": "缓存设备"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "缓存精度",
+          "name": "缓存精度",
+          "type": "COMBO",
+          "widget": {
+            "name": "缓存精度"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "编码器设备",
+          "name": "编码器设备",
+          "type": "COMBO",
+          "widget": {
+            "name": "编码器设备"
+          },
+          "link": null
+        },
+        {
+          "name": "分镜图长边",
+          "type": "INT",
+          "shape": 7,
+          "widget": {
+            "name": "分镜图长边"
+          },
+          "link": null
+        },
+        {
+          "name": "上镜参考策略",
+          "type": "COMBO",
+          "shape": 7,
+          "widget": {
+            "name": "上镜参考策略"
+          },
+          "link": null
+        },
+        {
+          "name": "参考读取长边",
+          "type": "INT",
+          "shape": 7,
+          "widget": {
+            "name": "参考读取长边"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "color_off": "#30e6ff",
+          "color_on": "#30e6ff",
+          "localized_name": "图像模型配置",
+          "name": "图像模型配置",
+          "type": "H3_IMAGE_SETTINGS",
+          "slot_index": 0,
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3ImageModelSettings",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        "qwen-image-2.1-UC-Q6_K.gguf",
+        "qwen3vl_8b_int8_convrot.safetensors",
+        "qwen_image_2.1_vae_bf16.safetensors",
+        25,
+        1,
+        "euler",
+        "simple",
+        1,
+        "auto",
+        "default",
+        "default",
+        1024,
+        "结构参考（原图细节优先）",
+        2048
+      ]
+    },
+    {
+      "id": 3,
+      "type": "H3VideoModelSettings",
+      "pos": [
+        -500,
+        240
+      ],
+      "size": [
+        430,
+        54
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "角色音色",
+          "name": "角色音色",
+          "shape": 7,
+          "type": "H3_VOICE_SETTINGS",
+          "link": 5
+        },
+        {
+          "localized_name": "对白音轨",
+          "name": "对白音轨",
+          "shape": 7,
+          "type": "H3_DIALOGUE_TRACK",
+          "link": 7
+        },
+        {
+          "localized_name": "基础模型",
+          "name": "基础模型",
+          "type": "COMBO",
+          "widget": {
+            "name": "基础模型"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "原作者模型",
+          "name": "原作者模型",
+          "type": "COMBO",
+          "widget": {
+            "name": "原作者模型"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "文本编码器",
+          "name": "文本编码器",
+          "type": "COMBO",
+          "widget": {
+            "name": "文本编码器"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "视频VAE",
+          "name": "视频VAE",
+          "type": "COMBO",
+          "widget": {
+            "name": "视频VAE"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "音频VAE",
+          "name": "音频VAE",
+          "type": "COMBO",
+          "widget": {
+            "name": "音频VAE"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "4步LoRA",
+          "name": "4步LoRA",
+          "type": "COMBO",
+          "widget": {
+            "name": "4步LoRA"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "8步LoRA",
+          "name": "8步LoRA",
+          "type": "COMBO",
+          "widget": {
+            "name": "8步LoRA"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "启用加速LoRA",
+          "name": "启用加速LoRA",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "启用加速LoRA"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "加速权重",
+          "name": "加速权重",
+          "type": "COMBO",
+          "widget": {
+            "name": "加速权重"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "加速步数",
+          "name": "加速步数",
+          "type": "COMBO",
+          "widget": {
+            "name": "加速步数"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "标准步数",
+          "name": "标准步数",
+          "type": "INT",
+          "widget": {
+            "name": "标准步数"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "低显存",
+          "name": "低显存",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "低显存"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "稀疏注意力",
+          "name": "稀疏注意力",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "稀疏注意力"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "视频采样器",
+          "name": "视频采样器",
+          "type": "COMBO",
+          "widget": {
+            "name": "视频采样器"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "视频调度器",
+          "name": "视频调度器",
+          "type": "COMBO",
+          "widget": {
+            "name": "视频调度器"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "color_off": "#6bff74",
+          "color_on": "#6bff74",
+          "localized_name": "视频模型配置",
+          "name": "视频模型配置",
+          "type": "H3_VIDEO_SETTINGS",
+          "slot_index": 0,
+          "links": [
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3VideoModelSettings",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "未选用（无需下载）",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "minimax_h3_video_vae_int8_convrot.safetensors",
+        "minimax_h3_audio_vae_fp32.safetensors",
+        "未选用（无需下载）",
+        "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        false,
+        "独立LoRA",
+        8,
+        20,
+        true,
+        false,
+        "res_multistep",
+        "simple"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "H3PromptRules",
+      "pos": [
+        -500,
+        330
+      ],
+      "size": [
+        430,
+        1300
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "分镜规划规则",
+          "name": "分镜规划规则",
+          "type": "STRING",
+          "widget": {
+            "name": "分镜规划规则"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "环境与光照规则",
+          "name": "环境与光照规则",
+          "type": "STRING",
+          "widget": {
+            "name": "环境与光照规则"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "动作与状态规则",
+          "name": "动作与状态规则",
+          "type": "STRING",
+          "widget": {
+            "name": "动作与状态规则"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "多图与构图规则",
+          "name": "多图与构图规则",
+          "type": "STRING",
+          "widget": {
+            "name": "多图与构图规则"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "视频提示词规则",
+          "name": "视频提示词规则",
+          "type": "STRING",
+          "widget": {
+            "name": "视频提示词规则"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "生图提示词规则",
+          "name": "生图提示词规则",
+          "type": "STRING",
+          "widget": {
+            "name": "生图提示词规则"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "提示词规则",
+          "name": "提示词规则",
+          "type": "H3_PROMPT_RULES",
+          "slot_index": 0,
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3PromptRules",
+        "h3_prompt_rules_locked": false,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        "通读完整原稿，按事件先后和各镜时长拆分镜头；每镜只安排本镜的新事件，不把整篇剧情重复到每一镜。对白与触发它的动作一起安排，原句少于镜头数时，将有对白的剧情节点自然分布到开头、中段和后段，避免前面连续说完、后面长时间空镜；原稿明确的静默、时间点和剧情因果优先，不机械平均、不新增或重复台词。静默镜头有明确叙事作用，不为填满时长擅加人物、剧情或镜头动作。",
+        "环境、光线和色彩以主参考图为准。未明确要求改变的部分保持原样，不额外补写光效、色调或曝光；后镜只继承前镜的动作状态，画面色彩始终参考原图。",
+        "人物身份连续，衣物、姿态、表情、手持物及道具位置随剧情更新。后镜从前镜结束状态继续，未改变的实体逐项保留，已完成事件保持其结果，不恢复初始状态再做一遍。姿态变化只按原稿真实发生；不能因为动作元数据遗漏就把明确的起身、坐下或休息姿态锁回旧姿态。每镜聚焦一个主要动作，原稿要求的次要动作按顺序轻柔衔接；手部接触写清哪只手、接触位置和前后关系，避免多只手同时交叉或道具穿插，不为丰富画面额外加大动作。",
+        "保留每张素材图的独立来源和角色；同一镜可把不同素材中的人物或物体按原稿组合，不能把编号互换或只看第一张。原图提供稳定身份、皮肤纹理和材质细节，上一分镜只补几何和状态连续性，不能把上一分镜当成新的清晰度或磨皮标准。独立规划每镜静态构图、景别和视角；在原稿允许的镜头语言内体现眼神、表情、手的位置和身体朝向变化，构图不能恢复旧衣着或未来动作。连续长镜头保持同一机位移动轨迹，不凭空切换景别或角度。",
+        "用简洁中文描述画面、当前状态、本镜新动作、表情和镜头运动。逐字对白只从指定白名单回填，声音属于对应的可见说话人，发声时自然开口；不擅加背景人声。保留原有环境音和配乐选择，跨镜继承已完成状态。",
+        "先根据剧情中已完成的事件落实本镜开场状态：例如帽子已摘下放在桌上、外套已挂好、杯子在手中或已放回，分别写清穿戴层次、物件位置与持有状态；未发生的变化不要提前表现。生成这个开场瞬间的一张静态图，再应用该镜景别、机位和布局。原素材只提供身份、材质、环境与细节，不恢复过期状态。保持原图自然皮肤纹理、发丝及衣料细节，不逐镜磨皮。手与物体接触边界、遮挡关系和人体比例自然，不表现多次手势，不写S编号、对白、帧率、镜头移动或晃动，不拼图或添加字幕。",
+        "",
+        [
+          false,
+          true
+        ],
+        [
+          false,
+          true
+        ],
+        [
+          false,
+          true
+        ],
+        [
+          false,
+          true
+        ],
+        [
+          false,
+          true
+        ],
+        [
+          false,
+          true
+        ]
+      ]
+    },
+    {
+      "id": 5,
+      "type": "H3VoiceLibrary",
+      "pos": [
+        -497.71929725230893,
+        414.8165846643364
+      ],
+      "size": [
+        430,
+        478
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "模式",
+          "name": "模式",
+          "type": "COMBO",
+          "widget": {
+            "name": "模式"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "角色分配",
+          "name": "角色分配",
+          "type": "STRING",
+          "widget": {
+            "name": "角色分配"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "角色音色",
+          "name": "角色音色",
+          "type": "H3_VOICE_SETTINGS",
+          "slot_index": 0,
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3VoiceLibrary",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        "模型默认",
+        "{}",
+        "",
+        [
+          false,
+          true
+        ]
+      ]
+    },
+    {
+      "id": 6,
+      "type": "H3StoryboardStudio",
+      "pos": [
+        6.854102923191568,
+        60
+      ],
+      "size": [
+        1750,
+        1122.07720352348
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "color_off": "#ffcf40",
+          "color_on": "#ffcf40",
+          "localized_name": "文本模型配置",
+          "name": "文本模型配置",
+          "shape": 7,
+          "type": "H3_TEXT_SETTINGS",
+          "link": 1
+        },
+        {
+          "color_off": "#30e6ff",
+          "color_on": "#30e6ff",
+          "localized_name": "图像模型配置",
+          "name": "图像模型配置",
+          "shape": 7,
+          "type": "H3_IMAGE_SETTINGS",
+          "link": 2
+        },
+        {
+          "color_off": "#6bff74",
+          "color_on": "#6bff74",
+          "localized_name": "视频模型配置",
+          "name": "视频模型配置",
+          "shape": 7,
+          "type": "H3_VIDEO_SETTINGS",
+          "link": 3
+        },
+        {
+          "color_off": "#ffad54",
+          "color_on": "#ffad54",
+          "localized_name": "提示词规则",
+          "name": "提示词规则",
+          "shape": 7,
+          "type": "H3_PROMPT_RULES",
+          "link": 4
+        },
+        {
+          "localized_name": "剧本",
+          "name": "剧本",
+          "type": "STRING",
+          "widget": {
+            "name": "剧本"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "参考图集",
+          "name": "参考图集",
+          "type": "STRING",
+          "widget": {
+            "name": "参考图集"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "生成模式",
+          "name": "生成模式",
+          "type": "COMBO",
+          "widget": {
+            "name": "生成模式"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "镜头衔接",
+          "name": "镜头衔接",
+          "type": "COMBO",
+          "widget": {
+            "name": "镜头衔接"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "分镜数量",
+          "name": "分镜数量",
+          "type": "INT",
+          "widget": {
+            "name": "分镜数量"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "每镜秒数",
+          "name": "每镜秒数",
+          "type": "STRING",
+          "widget": {
+            "name": "每镜秒数"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "画幅",
+          "name": "画幅",
+          "type": "COMBO",
+          "widget": {
+            "name": "画幅"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "生成档位",
+          "name": "生成档位",
+          "type": "COMBO",
+          "widget": {
+            "name": "生成档位"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "自定义宽度",
+          "name": "自定义宽度",
+          "type": "INT",
+          "widget": {
+            "name": "自定义宽度"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "自定义高度",
+          "name": "自定义高度",
+          "type": "INT",
+          "widget": {
+            "name": "自定义高度"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "适配方式",
+          "name": "适配方式",
+          "type": "COMBO",
+          "widget": {
+            "name": "适配方式"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "末帧处理",
+          "name": "末帧处理",
+          "type": "COMBO",
+          "widget": {
+            "name": "末帧处理"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "语言模型",
+          "name": "语言模型",
+          "type": "COMBO",
+          "widget": {
+            "name": "语言模型"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "声音模式",
+          "name": "声音模式",
+          "type": "COMBO",
+          "widget": {
+            "name": "声音模式"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "启用加速LoRA",
+          "name": "启用加速LoRA",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "启用加速LoRA"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "加速权重",
+          "name": "加速权重",
+          "type": "COMBO",
+          "widget": {
+            "name": "加速权重"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "加速步数",
+          "name": "加速步数",
+          "type": "COMBO",
+          "widget": {
+            "name": "加速步数"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "标准步数",
+          "name": "标准步数",
+          "type": "INT",
+          "widget": {
+            "name": "标准步数"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "随机种子",
+          "name": "随机种子",
+          "type": "INT",
+          "widget": {
+            "name": "随机种子"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "低显存",
+          "name": "低显存",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "低显存"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "稀疏注意力",
+          "name": "稀疏注意力",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "稀疏注意力"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "完成后",
+          "name": "完成后",
+          "type": "COMBO",
+          "widget": {
+            "name": "完成后"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "执行范围",
+          "name": "执行范围",
+          "type": "COMBO",
+          "widget": {
+            "name": "执行范围"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "继续任务",
+          "name": "继续任务",
+          "type": "STRING",
+          "widget": {
+            "name": "继续任务"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "重做镜头",
+          "name": "重做镜头",
+          "type": "INT",
+          "widget": {
+            "name": "重做镜头"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "分镜覆盖",
+          "name": "分镜覆盖",
+          "type": "STRING",
+          "widget": {
+            "name": "分镜覆盖"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "基础模型",
+          "name": "基础模型",
+          "type": "COMBO",
+          "widget": {
+            "name": "基础模型"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "原作者模型",
+          "name": "原作者模型",
+          "type": "COMBO",
+          "widget": {
+            "name": "原作者模型"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "文本编码器",
+          "name": "文本编码器",
+          "type": "COMBO",
+          "widget": {
+            "name": "文本编码器"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "视频VAE",
+          "name": "视频VAE",
+          "type": "COMBO",
+          "widget": {
+            "name": "视频VAE"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "音频VAE",
+          "name": "音频VAE",
+          "type": "COMBO",
+          "widget": {
+            "name": "音频VAE"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "保留分镜计划",
+          "name": "保留分镜计划",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "保留分镜计划"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "计划编辑",
+          "name": "计划编辑",
+          "type": "STRING",
+          "widget": {
+            "name": "计划编辑"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "生图重做范围",
+          "name": "生图重做范围",
+          "type": "COMBO",
+          "widget": {
+            "name": "生图重做范围"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "重生图片",
+          "name": "重生图片",
+          "type": "STRING",
+          "widget": {
+            "name": "重生图片"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "时长模式",
+          "name": "时长模式",
+          "type": "COMBO",
+          "widget": {
+            "name": "时长模式"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "目标总秒数",
+          "name": "目标总秒数",
+          "type": "FLOAT",
+          "widget": {
+            "name": "目标总秒数"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "画幅参考图",
+          "name": "画幅参考图",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "画幅参考图"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "手动分镜图片",
+          "name": "手动分镜图片",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "手动分镜图片"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "导入优化计划",
+          "name": "导入优化计划",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "导入优化计划"
+          },
+          "link": null
+        },
+        {
+          "name": "提示词格式",
+          "type": "COMBO",
+          "shape": 7,
+          "widget": {
+            "name": "提示词格式"
+          },
+          "link": null
+        },
+        {
+          "name": "分镜图长边",
+          "type": "INT",
+          "shape": 7,
+          "widget": {
+            "name": "分镜图长边"
+          },
+          "link": null
+        },
+        {
+          "name": "参考读取长边",
+          "type": "INT",
+          "shape": 7,
+          "widget": {
+            "name": "参考读取长边"
+          },
+          "link": null
+        },
+        {
+          "name": "衔接超分配置",
+          "type": "STRING",
+          "shape": 7,
+          "widget": {
+            "name": "衔接超分配置"
+          },
+          "link": null
+        },
+        {
+          "name": "视频短边上限",
+          "type": "INT",
+          "shape": 7,
+          "widget": {
+            "name": "视频短边上限"
+          },
+          "link": null
+        },
+        {
+          "name": "生图后生成视频",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "生图后生成视频"
+          },
+          "shape": 7,
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "任务记录",
+          "name": "任务记录",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": [
+            601
+          ]
+        },
+        {
+          "localized_name": "分镜生图",
+          "name": "分镜生图",
+          "type": "H3_MANUAL_SOURCE",
+          "slot_index": 1,
+          "links": [
+            6
+          ]
+        }
+      ],
+      "title": "小陈 MiniMax H3 多分镜工作台 V1.2.4",
+      "properties": {
+        "Node name for S&R": "H3StoryboardStudio",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "h3_director_version": "1.2.4",
+        "h3_auto_video": false,
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        "",
+        "[]",
+        "AI生成分镜",
+        "首尾帧约束",
+        2,
+        "8,8",
+        "跟随图片",
+        "480P",
+        640,
+        384,
+        "等比补边",
+        "亮度轻校正",
+        "qwen3.5:9b",
+        "自动识别原稿",
+        false,
+        "独立LoRA",
+        8,
+        20,
+        42,
+        true,
+        false,
+        "保留模型缓存",
+        "完整生成",
+        "",
+        0,
+        "{}",
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "minimax_h3_video_vae_int8_convrot.safetensors",
+        "minimax_h3_audio_vae_fp32.safetensors",
+        true,
+        "{}",
+        "保留现有图片",
+        "[]",
+        "手动设置",
+        16,
+        "图1",
+        "[]",
+        "",
+        "工作台格式",
+        1024,
+        2048,
+        "{}",
+        0,
+        false,
+        [
+          false,
+          true
+        ],
+        [
+          false,
+          true
+        ]
+      ]
+    },
+    {
+      "id": 7,
+      "type": "H3ManualImageStudio",
+      "pos": [
+        1805,
+        60
+      ],
+      "size": [
+        574,
+        1100
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 2,
+      "inputs": [
+        {
+          "localized_name": "分镜来源",
+          "name": "分镜来源",
+          "shape": 7,
+          "type": "H3_MANUAL_SOURCE",
+          "link": 6
+        },
+        {
+          "localized_name": "图像模型配置",
+          "name": "图像模型配置",
+          "shape": 7,
+          "type": "H3_IMAGE_SETTINGS",
+          "link": null
+        },
+        {
+          "localized_name": "任务数据",
+          "name": "任务数据",
+          "type": "STRING",
+          "widget": {
+            "name": "任务数据"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "候选记录",
+          "name": "候选记录",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": []
+        }
+      ],
+      "title": "Image2.1 独立生图 V1.2.1",
+      "properties": {
+        "Node name for S&R": "H3ManualImageStudio",
+        "h3_manual_last_source_enabled": false,
+        "h3_manual_source_id": "6",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "任务数据": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        "{}",
+        "",
+        [
+          false,
+          true
+        ]
+      ]
+    },
+    {
+      "id": 8,
+      "type": "H3DialogueAudio",
+      "pos": [
+        -660,
+        1220
+      ],
+      "size": [
+        634,
+        700
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 4,
+      "mode": 4,
+      "inputs": [
+        {
+          "localized_name": "启用",
+          "name": "启用",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "启用"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "对白文件",
+          "name": "对白文件",
+          "type": "COMBO",
+          "widget": {
+            "name": "对白文件"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "配音数据",
+          "name": "配音数据",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "配音数据"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "对白音轨",
+          "name": "对白音轨",
+          "type": "H3_DIALOGUE_TRACK",
+          "slot_index": 0,
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3DialogueAudio",
+        "h3_dialogue_source_id": "6",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "启用": true,
+            "对白文件": true,
+            "配音数据": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        false,
+        "",
+        "{}"
+      ]
+    },
+    {
+      "id": 30,
+      "type": "H3Subtitles",
+      "pos": [
+        2420,
+        60
+      ],
+      "size": [
+        580,
+        780
+      ],
+      "flags": {},
+      "order": 30,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "启用字幕",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "启用字幕"
+          }
+        },
+        {
+          "name": "执行步骤",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "执行步骤"
+          }
+        },
+        {
+          "name": "识别语言",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "识别语言"
+          }
+        },
+        {
+          "name": "字体",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "字体"
+          }
+        },
+        {
+          "name": "字号",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "字号"
+          }
+        },
+        {
+          "name": "颜色",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "颜色"
+          }
+        },
+        {
+          "name": "黑色描边",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "黑色描边"
+          }
+        },
+        {
+          "name": "横向位置",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "横向位置"
+          }
+        },
+        {
+          "name": "纵向位置",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "纵向位置"
+          }
+        },
+        {
+          "name": "编辑字幕",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "编辑字幕"
+          }
+        },
+        {
+          "name": "任务记录",
+          "type": "STRING",
+          "link": 601,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "字幕视频",
+          "type": "VIDEO",
+          "links": [],
+          "slot_index": 0
+        },
+        {
+          "name": "字幕文件",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 1
+        }
+      ],
+      "title": "可选字幕 · 默认关闭",
+      "properties": {
+        "Node name for S&R": "H3Subtitles",
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        false,
+        "识别并保存字幕视频",
+        "自动",
+        "Microsoft YaHei",
+        36,
+        "#ffffff",
+        2,
+        50,
+        90,
+        ""
+      ]
+    },
+    {
+      "id": 31,
+      "type": "H3ManualPlan",
+      "pos": [
+        -660,
+        1580
+      ],
+      "size": [
+        560,
+        620
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 31,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "手动分镜JSON",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "手动分镜JSON"
+          }
+        },
+        {
+          "name": "生成模式",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "生成模式"
+          }
+        },
+        {
+          "name": "声音模式",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "声音模式"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "导入优化计划",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 0
+        },
+        {
+          "name": "原始剧本",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 1
+        },
+        {
+          "name": "每镜秒数",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 2
+        }
+      ],
+      "title": "不使用AI时的手动分镜模板",
+      "properties": {
+        "Node name for S&R": "H3ManualPlan",
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        "{}",
+        "AI生成分镜",
+        "自动识别原稿"
+      ]
+    },
+    {
+      "id": 40,
+      "type": "MarkdownNote",
+      "title": "BBAIGC 使用说明",
+      "pos": [
+        -1250,
+        60
+      ],
+      "size": [
+        540,
+        380
+      ],
+      "flags": {},
+      "order": 40,
+      "mode": 0,
+      "properties": {},
+      "widgets_values": [
+        "BBAIGC · 使用方法、模型目录与智能体安装提示词见仓库 README。"
+      ]
+    },
+    {
+      "id": 41,
+      "type": "MarkdownNote",
+      "title": "BBAIGC 使用说明",
+      "pos": [
+        -1250,
+        470
+      ],
+      "size": [
+        540,
+        380
+      ],
+      "flags": {},
+      "order": 41,
+      "mode": 0,
+      "properties": {},
+      "widgets_values": [
+        "BBAIGC · 使用方法、模型目录与智能体安装提示词见仓库 README。"
+      ]
+    },
+    {
+      "id": 42,
+      "type": "MarkdownNote",
+      "title": "BBAIGC 使用说明",
+      "pos": [
+        -1250,
+        880
+      ],
+      "size": [
+        540,
+        380
+      ],
+      "flags": {},
+      "order": 42,
+      "mode": 0,
+      "properties": {},
+      "widgets_values": [
+        "BBAIGC · 使用方法、模型目录与智能体安装提示词见仓库 README。"
+      ]
+    },
+    {
+      "id": 43,
+      "type": "CodexSpeechInput",
+      "title": "语音输入 · SenseVoice",
+      "pos": [
+        -1250,
+        2250
+      ],
+      "size": [
+        600,
+        460
+      ],
+      "flags": {},
+      "order": 77,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "启用识别",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "启用识别"
+          }
+        },
+        {
+          "name": "识别文字",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "识别文字"
+          }
+        },
+        {
+          "name": "音频文件",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "音频文件"
+          }
+        },
+        {
+          "name": "识别语言",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "识别语言"
+          }
+        },
+        {
+          "name": "数字规范",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "数字规范"
+          }
+        },
+        {
+          "name": "CPU线程",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "CPU线程"
+          }
+        },
+        {
+          "name": "外接音频",
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "name": "运行前卸载模型",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "运行前卸载模型"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "识别文本",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CodexSpeechInput",
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.2.4"
+      },
+      "widgets_values": [
+        false,
+        "",
+        "",
+        "自动",
+        true,
+        4,
+        true
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      6,
+      0,
+      "H3_TEXT_SETTINGS"
+    ],
+    [
+      2,
+      2,
+      0,
+      6,
+      1,
+      "H3_IMAGE_SETTINGS"
+    ],
+    [
+      3,
+      3,
+      0,
+      6,
+      2,
+      "H3_VIDEO_SETTINGS"
+    ],
+    [
+      4,
+      4,
+      0,
+      6,
+      3,
+      "H3_PROMPT_RULES"
+    ],
+    [
+      5,
+      5,
+      0,
+      3,
+      0,
+      "H3_VOICE_SETTINGS"
+    ],
+    [
+      6,
+      6,
+      1,
+      7,
+      0,
+      "H3_MANUAL_SOURCE"
+    ],
+    [
+      7,
+      8,
+      0,
+      3,
+      1,
+      "H3_DIALOGUE_TRACK"
+    ],
+    [
+      601,
+      6,
+      0,
+      30,
+      10,
+      "STRING"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "模型与声音配置",
+      "bounding": [
+        -690,
+        20,
+        645,
+        1250
+      ],
+      "color": "#555555",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "h3_director_version": "1.2.4",
+    "ds": {
+      "scale": 0.5989500000000002,
+      "offset": [
+        1577.6743074733836,
+        426.9501406952303
+      ]
+    },
+    "codex_version": "1.1.0",
+    "bbaigc_author": "BBAIGC",
+    "bbaigc_product": "h3",
+    "bbaigc_version": "1.2.4",
+    "workflowVersion": "1.2.4",
+    "bbaigc_public": true
+  },
+  "version": 0.4
+}

@@ -1,7 +1,8 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { H3_STUDIO_VERSION } from "./version.js";
-import { reconcileReferences, normalizeReferenceMentions, editorPlainText, editorClipboardSelection } from "./reference_utils.js";
+import { normalizeReferenceMentions, editorPlainText, editorClipboardSelection } from "./reference_utils.js";
+import {reconcileH3References,h3ReferenceTokens} from "./h3_reference_bindings.js";
 import { colorH3Connections } from "./link_colors.js";
 import { createReferenceUpscalePanel } from "./reference_upscale.js";
 import {fileKind,decodeScript,downloadPlan,updateIdentity} from './plan_files.js';
@@ -560,7 +561,7 @@ function createScriptEditor(getReferences,options={}) {
     editor.contentEditable = options.readOnly?"false":"true"; editor.spellcheck = false;editor.tabIndex=0;
     if(options.readOnly)editor.setAttribute("aria-readonly","true");
     editor.setAttribute("role","textbox"); editor.setAttribute("aria-multiline","true");
-    editor.setAttribute("aria-label","完整剧本，输入@引用参考图");
+    editor.setAttribute("aria-label","完整剧本，图1、参考图2或image 3自动关联参考图");
     let savedSelection = [0,0];
     function selection() {
         const selected = window.getSelection();
@@ -595,17 +596,18 @@ function createScriptEditor(getReferences,options={}) {
         const fragment=document.createDocumentFragment();
         const references=new Map(getReferences().map(reference=>[reference.id,reference]));
         let position=0;
-        const pattern=options.generated?/@(图[1-9]\d*|分镜[1-9]\d*|首帧[1-9]\d*|结束帧)/g:/@(图[1-9]\d*)/g;
-        for (const match of String(text).matchAll(pattern)) {
-            if(match.index>position)fragment.append(document.createTextNode(text.slice(position,match.index)));
-            const identity=match[1],reference=references.get(identity);
-            const chip=el("span","h3-inline-ref");chip.contentEditable="false";chip.dataset.h3Reference=identity;
-            chip.setAttribute("role","img");chip.setAttribute("aria-label",`参考图 ${identity}`);
+        const matches=options.generated?[...String(text).matchAll(/@(图[1-9]\d*|分镜[1-9]\d*|首帧[1-9]\d*|结束帧)/g)].map(match=>({start:match.index,end:match.index+match[0].length,token:match[0],id:match[1],reference:references.get(match[1])})):h3ReferenceTokens(text,options.getBindings?.(),getReferences());
+        for (const match of matches) {
+            if(match.start>position)fragment.append(document.createTextNode(text.slice(position,match.start)));
+            const identity=match.id||`图${match.number}`,reference=match.reference;
+            const chip=el("span","h3-inline-ref");chip.contentEditable="false";chip.dataset.h3Reference=identity;chip.dataset.qwsReferenceText=match.token;
+            chip.dataset.h3Start=String(match.start);chip.dataset.h3End=String(match.end);if(match.uid)chip.dataset.h3Uid=match.uid;
+            chip.setAttribute("role",match.missing?"button":"img");chip.setAttribute("aria-label",match.missing?"未引用，点击重新选择图片":`参考图 ${identity}`);if(match.missing)chip.tabIndex=0;
             if(reference&&(reference.filename||reference.media?.filename)){const image=el("img");image.src=reference.media?mediaURL(reference.media):referenceURL(reference);image.alt="";image.draggable=false;chip.append(image);}
             else if(reference?.pending){chip.dataset.pending="true";chip.append(el("span","h3-ref-placeholder","…"));chip.title="等待生成";}
-            else{chip.dataset.missing="true";chip.title="参考图已移除";}
-            chip.append(el("span","",identity));fragment.append(chip);
-            position=match.index+match[0].length;
+            else{chip.dataset.missing="true";chip.title="未引用，点击重新选择图片";}
+            chip.append(el("span","",match.missing?"未引用":identity));fragment.append(chip);
+            position=match.end;
         }
         if(position<text.length)fragment.append(document.createTextNode(text.slice(position)));
         if(!fragment.childNodes.length)fragment.append(document.createTextNode(""));
@@ -678,6 +680,7 @@ function setupStudio(node,nodeData) {
     let disposed = false;
     let syncing = false;
     let references = [];
+    let referenceBindings=node.properties?.h3_reference_bindings||null;
     let durations = [];
     let durationDisplaySignature="";
     let snapshot = null;
@@ -764,10 +767,24 @@ function setupStudio(node,nodeData) {
         actionState.textContent = "";
         renderPreview();
     }
+    function bindDraftReferences(text=textarea.value,removedIds=[],previousEntries=references){
+        const raw=String(text),start=textarea.selectionStart,end=textarea.selectionEnd,active=document.activeElement===textarea;
+        const result=reconcileH3References(references,raw,referenceBindings,{previousEntries,removedIds});
+        references=result.references;referenceBindings=result.bindings;node.properties||={};node.properties.h3_reference_bindings=referenceBindings;node.properties.h3_ref_serial=references.length;
+        if(raw!==result.script){
+            const offset=position=>normalizeReferenceMentions(raw.slice(0,position),101).script.length;
+            textarea.value=result.script;if(active)textarea.setSelectionRange(Math.min(result.script.length,offset(start)),Math.min(result.script.length,offset(end)));
+        }else textarea.refreshReferences();
+        write("参考图集",JSON.stringify(references));write("剧本",result.script);
+        const unresolved=h3ReferenceTokens(result.script,referenceBindings,references).filter(item=>item.missing);
+        if(unresolved.length){textarea.setAttribute("aria-invalid","true");uploadState.textContent="有未引用的图片，请点击红色引用重新选择，或删除该引用。";uploadState.classList.add("h3-reference-error");uploadState.dataset.referenceError="true";}
+        return result;
+    }
     function scriptChanged(){
         preflightFailure=null;
         if(typeof node.properties?.h3_optimized_import_text==="string"){delete node.properties.h3_optimized_import_text;write("导入优化计划","{}");}
         delete gallery.dataset.referenceError;textarea.removeAttribute("aria-invalid");uploadState.classList.remove("h3-reference-error");if(uploadState.dataset.referenceError){uploadState.textContent="";delete uploadState.dataset.referenceError;}
+        bindDraftReferences();
         write("剧本",textarea.value);
         if(["running","generating"].includes(snapshot?.status)){
             draftChanged=true;node.properties||={};node.properties.h3_draft_changed=true;
@@ -855,7 +872,7 @@ function setupStudio(node,nodeData) {
 
     const referenceSection = el("section");
     const referenceBar = el("div", "h3-row");
-    const referenceTitle=el("strong","h3-grow","参考图 ");referenceTitle.append(el("span","h3-reference-hint","（单击图片或在输入框用“@”选择插入）"));referenceBar.append(referenceTitle);
+    const referenceTitle=el("strong","h3-grow","参考图 ");referenceTitle.append(el("span","h3-reference-hint","（图1、参考图2、image 3 自动识别，也可用 @）"));referenceBar.append(referenceTitle);
     const referenceCount = el("span", "h3-muted");
     const uploadButton = el("button", "", "添加图片");
     const fileInput = el("input");
@@ -870,9 +887,9 @@ function setupStudio(node,nodeData) {
 
     const scriptSection = el("section");
     const scriptBar = el("div", "h3-row");
-    scriptBar.append(el("strong", "h3-grow", "原始剧本"), el("span", "h3-muted", "@ 引用图片 · Ctrl+V 粘贴图片"));
+    scriptBar.append(el("strong", "h3-grow", "原始剧本"), el("span", "h3-muted", "图1／image 1 自动识别 · Ctrl+V 粘贴图片"));
     const editor = el("div", "h3-editor");
-    const textarea = createScriptEditor(()=>references);
+    const textarea = createScriptEditor(()=>references,{getBindings:()=>referenceBindings});
     const importScript=el('button','','导入剧本'),scriptFile=el('input');importScript.type='button';scriptFile.type='file';scriptFile.accept='.txt,.md,.markdown,.text';scriptFile.hidden=true;importScript.onclick=()=>scriptFile.click();scriptFile.onchange=()=>readWorkspaceFile(scriptFile.files[0]).finally(()=>{scriptFile.value='';});scriptBar.append(importScript,scriptFile);
     const picker = el("div", "h3-picker");
     picker.setAttribute("role", "listbox"); picker.setAttribute("aria-label", "选择参考图"); picker.hidden = true;
@@ -1245,7 +1262,7 @@ function setupStudio(node,nodeData) {
         preflightFailure=null;
         if(!references.length){preflightFailure={stage:"settings",field:"参考图集",message:"请先添加参考图",suggestion:"点击参考图区的添加按钮，或拖入、粘贴图片。"};renderFailure();gallery.scrollIntoView({block:"nearest",inline:"nearest"});return false;}
         const result=normalizeReferenceMentions(textarea.value,references.length);
-        if(result.changed){textarea.value=result.script;write("剧本",result.script);renderMentions();if(!["running","generating"].includes(snapshot?.status))invalidateSource();}
+        if(result.changed){textarea.value=result.script;bindDraftReferences();renderMentions();if(!["running","generating"].includes(snapshot?.status))invalidateSource();}
         if(result.valid){delete gallery.dataset.referenceError;textarea.removeAttribute("aria-invalid");uploadState.classList.remove("h3-reference-error");if(uploadState.dataset.referenceError){uploadState.textContent="";delete uploadState.dataset.referenceError;}
             if(value("时长模式","手动设置")==="AI自动分配"){
                 const total=Number(targetDuration.value),count=durations.length;
@@ -1258,12 +1275,8 @@ function setupStudio(node,nodeData) {
     }
     function saveReferences(removedIds=[]) {
         preflightFailure=null;
-        const reconciled=reconcileReferences(references,textarea.value,{removedIds});
-        references=reconciled.references;
+        bindDraftReferences(textarea.value,removedIds);
         aspectReference();aspectPicker.hidden=true;
-        if(textarea.value!==reconciled.script)textarea.value=reconciled.script;
-        write("参考图集",JSON.stringify(references));write("剧本",reconciled.script);
-        node.properties||={};node.properties.h3_ref_serial=references.length;
         invalidateSource();
     }
     function saveDurations() {
@@ -1598,7 +1611,7 @@ function setupStudio(node,nodeData) {
             pick.oncontextmenu=event=>{event.preventDefault();event.stopPropagation();openImageViewer(()=>references.map(item=>({id:item.id,url:referenceURL(item)})),reference.id);};
             const remove = el("button", "h3-remove", "×"); remove.setAttribute("aria-label", `移除${reference.id}`);
             remove.onclick = () => {
-                references = references.filter(item => item.id !== reference.id);saveReferences([reference.id]);renderReferences();renderMentions();
+                bindDraftReferences();references = references.filter(item => item.uid !== reference.uid);saveReferences([reference.id]);renderReferences();renderMentions();
                 uploadState.textContent=references.length?"图片编号与剧本引用已更新。":"参考图已清空。";
             };
             card.append(pick, remove); gallery.append(card);
@@ -1627,8 +1640,18 @@ function setupStudio(node,nodeData) {
             picker.append(button);
         });
     }
-    textarea.addEventListener("input", () => {scriptChanged(); pickerIndex = 0; updatePicker();});
-    textarea.addEventListener("click", updatePicker);
+    let composingScript=false;
+    textarea.addEventListener("compositionstart",()=>{composingScript=true;});
+    textarea.addEventListener("compositionend",()=>{composingScript=false;scriptChanged();pickerIndex=0;updatePicker();});
+    textarea.addEventListener("input",event=>{if(composingScript||event.isComposing){write("剧本",textarea.value);return;}scriptChanged();pickerIndex=0;updatePicker();});
+    function repairReferenceChip(chip){
+        const start=Number(chip.dataset.h3Start),end=Number(chip.dataset.h3End);textarea.focus();textarea.setSelectionRange(start,end);
+        atRange=[start,end];pickerMatches=[...references];pickerIndex=0;picker.replaceChildren();picker.hidden=false;
+        if(!references.length)picker.append(el("span","h3-muted","请先添加参考图"));
+        for(const reference of pickerMatches){const button=el("button","h3-choice"),image=el("img");image.src=referenceURL(reference);image.alt="";button.setAttribute("role","option");button.append(image,el("span","",reference.id));button.onmousedown=event=>event.preventDefault();button.onclick=()=>insertReference(reference);picker.append(button);}
+    }
+    textarea.addEventListener("click",event=>{const chip=event.target.closest?.('[data-h3-reference][data-missing=true]');if(chip){event.preventDefault();repairReferenceChip(chip);}else updatePicker();});
+    textarea.addEventListener("keydown",event=>{if((event.key==='Enter'||event.key===' ')&&event.target.matches?.('[data-h3-reference][data-missing=true]')){event.preventDefault();repairReferenceChip(event.target);}});
     textarea.addEventListener("keydown", event => {
         if (picker.hidden) return;
         if (event.key === "Escape") {event.preventDefault(); picker.hidden = true; atRange = null;}
@@ -2203,10 +2226,12 @@ function setupStudio(node,nodeData) {
             const raw = JSON.parse(String(value("参考图集", "[]")));
             references = Array.isArray(raw) ? raw.filter(item => item?.id && item?.filename).slice(0,MAX_REFERENCES) : [];
         } catch {references = [];}
-        const reconciled=reconcileReferences(references,String(value("剧本","")));
-        references=reconciled.references;node.properties.h3_ref_serial=references.length;
-        if(reconciled.changed){write("参考图集",JSON.stringify(references));write("剧本",reconciled.script);invalidateSource();}
+        referenceBindings=node.properties.h3_reference_bindings||referenceBindings;
+        const reconciled=reconcileH3References(references,String(value("剧本","")),referenceBindings);
+        references=reconciled.references;referenceBindings=reconciled.bindings;node.properties.h3_reference_bindings=referenceBindings;node.properties.h3_ref_serial=references.length;
+        write("参考图集",JSON.stringify(references));write("剧本",reconciled.script);
         textarea.value = reconciled.script;
+        if(h3ReferenceTokens(reconciled.script,referenceBindings,references).some(item=>item.missing)){textarea.setAttribute("aria-invalid","true");uploadState.textContent="有未引用的图片，请点击红色引用重新选择，或删除该引用。";uploadState.classList.add("h3-reference-error");uploadState.dataset.referenceError="true";}
         modeSelect.value = MODES.includes(value("生成模式")) ? value("生成模式") : MODES[1];
         const imported=importedPlanData();if(imported&&!snapshot?.run_id&&typeof node.properties.h3_optimized_import_text!=="string"&&typeof imported.optimized_script==="string")node.properties.h3_optimized_import_text=imported.optimized_script;
         const count = Math.min(MAX_SCENES,Math.max(1,Number(value("分镜数量",3)) || 3));
@@ -2369,8 +2394,8 @@ function setupStudio(node,nodeData) {
     })[mode];
     referenceTitle.title="单击图片插入引用，右键打开大图；可拖入图片或按Ctrl+V粘贴。";
     referenceExpand.title="展开参考图区并放大缩略图，再次点击收起；运行中也可使用。";
-    textarea.title="输入剧本，用@选择参考图；单图无引用时自动补入，多图需至少指定一张。运行中的修改保留为下次草稿。";
-    scriptBar.title="在原稿中用@指定素材图片，或单击图库图片插入。";
+    textarea.title="图1、参考图2、image 3、ref 1会自动绑定；也支持@选择。红色未引用可点击重新选择。运行中的修改用于下次任务。";
+    scriptBar.title="直接输入图1、参考图2或image 3即可自动关联，也可用@或单击图片插入。";
     optimizedScript.title="查看完整剧本与分镜；可粘贴已优化的完整总览直接复用计划，滚轮可滚动内容。";
     overviewExpand.title="展开到当前工作区底部以查看更多内容，再次点击收起；运行中也可使用。";
     dialogueToggle.title="切换查看最终视频会发声的台词与说话人，再次点击返回完整总览。";
