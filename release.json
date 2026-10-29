@@ -3,7 +3,7 @@
   "version": "1.2.2",
   "author": "BBAIGC",
   "workflow": "workflows/BBAIGC_h3_V1.2.2.json",
-  "sha256": "4516966cef9852ea67429a2eefd890bee372bbd9852422022df49917efff8d26",
+  "sha256": "5ab47e5690fbf8eba58e67714f88844736832e7683f504b62922eb1c878e201c",
   "node_versions": {
     "core": "1.2.2"
   },
