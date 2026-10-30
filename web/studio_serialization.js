@@ -128,7 +128,7 @@ export function installFinishingWidgetSerialization(node,data){
 app.registerExtension({
     name:'Codex.StudioSerialization',
     beforeRegisterNodeDef(type,data){
-        if(!['CodexStudioBBAPI','CodexStudioMossPrompt','CodexQwenStudioRepair','CodexQwenStudioUpscale','CodexPromptOptimize','CodexStudioStageOutput','CodexImageOutput'].includes(data.name))return;
+        if(!['CodexStudioBBAPI','CodexStudioMossPrompt','CodexStudioKreaGenerate','CodexQwenStudioRepair','CodexQwenStudioUpscale','CodexPromptOptimize','CodexStudioStageOutput','CodexImageOutput'].includes(data.name))return;
         const created=type.prototype.onNodeCreated;
         type.prototype.onNodeCreated=function(){const result=created?.apply(this,arguments);if(data.name==='CodexStudioBBAPI')installBBAPIWidgetSerialization(this);else if(data.name==='CodexStudioMossPrompt')installSingleReferenceWidgetSerialization(this);else installFinishingWidgetSerialization(this,data);return result;};
     },

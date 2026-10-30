@@ -21,6 +21,16 @@ def _implementation_identities(names):
     return {name: hashlib.sha256((directory/name).read_bytes()).hexdigest() for name in names}
 
 
+def effective_video_seed(kwargs):
+    image_seed = kwargs.get("随机种子", 42)
+    video_seed = kwargs.get("视频种子", -1)
+    if type(image_seed) is not int or not 0 <= image_seed <= 2**32 - 1:
+        raise ValueError("图像与规划随机种子应为0～4294967295的整数。")
+    if type(video_seed) is not int or not -1 <= video_seed <= 2**32 - 1:
+        raise ValueError("视频种子应为0～4294967295的整数；-1沿用原随机种子。")
+    return image_seed if video_seed == -1 else video_seed
+
+
 def stage_fingerprints(kwargs, references, durations, *, image_settings, width, height):
     automatic = kwargs.get("时长模式", "手动设置") == "AI自动分配"
     planning = {"script": kwargs.get("剧本"), "references": references,
@@ -42,6 +52,11 @@ def stage_fingerprints(kwargs, references, durations, *, image_settings, width, 
     image_hash = _digest(image)
     video = {"image": image_hash, "settings": {key: kwargs.get(key) for key in VIDEO_KEYS},
              "implementation": _implementation_identities(("shot_nodes.py", "native_nodes.py"))}
+    video_seed = effective_video_seed(kwargs)
+    # Legacy tasks did not store a separate video seed. Omitted, inherited and
+    # explicitly identical values retain their original video stage identity.
+    if kwargs.get("视频种子", -1) >= 0 and video_seed != kwargs.get("随机种子", 42):
+        video["video_seed"] = video_seed
     return {"schema": STAGE_SCHEMA, "planning": planning_hash, "image": image_hash, "video": _digest(video)}
 
 

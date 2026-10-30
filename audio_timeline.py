@@ -303,9 +303,9 @@ def mux_dialogue(payload):
         destination = original.with_name(original.stem + f"_配音_{stamp}.mp4")
         partial = destination.with_suffix(".partial.mp4")
         try:
-            _ffmpeg(["-i", original, "-i", track, "-map", "0:v:0", "-map", "1:a:0",
+            _ffmpeg(["-i", original, "-i", track, "-map", "0:v:0", "-map", "1:a:0", "-map_metadata", "0",
                      "-c:v", "copy", "-c:a", "aac", "-ar", SAMPLE_RATE, "-ac", "2", "-b:a", "192k",
-                     "-t", f"{duration:.12g}", "-movflags", "+faststart", partial])
+                     "-t", f"{duration:.12g}", "-movflags", "use_metadata_tags+faststart", partial])
             new_info = _probe(partial)
             output_video = next((stream for stream in new_info["streams"] if stream["type"] == "video"), None)
             if output_video is None or output_video["codec"] != video_stream["codec"]:

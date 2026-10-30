@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 DEFAULT_SETTINGS = {"model": MODEL, "clip": ENCODER, "vae": VAE,
                     "steps": 25, "cfg": 1.0, "sampler": "euler", "scheduler": "simple",
                     "denoise": 1.0, "cache_device": "auto", "cache_dtype": "default",
-                    "clip_device": "default", "storyboard_long_edge": 0,
+                    "clip_device": "default", "storyboard_long_edge": 2048,
                     "previous_reference_policy": PREVIOUS_REFERENCE_POLICIES[0], "reference_long_edge": 0}
 
 
@@ -376,12 +376,15 @@ encoder's 16-image maximum. H3 consumes the resulting one first frame.
                 (1, 64, height // 16, width // 16), device=mm.intermediate_device())}
         _notify_progress(progress_callback, "sampling")
         # Keep the original node method so LC123's encoder-unload wrapper and
-        # any other installed sampler behavior continue to run unchanged.
+        # other installed sampler behavior remain in use for ordinary weights.
+        # Turbo weights use their official distilled schedule when selected.
+        from .image_sampling import sample_image2
         with _sampling_progress(progress_callback):
-            handles["sample"] = nodes.KSampler().sample(
+            handles["sample"] = sample_image2(
                 model=handles["model"], seed=int(seed), steps=settings["steps"], cfg=settings["cfg"],
-                sampler_name=settings["sampler"], scheduler=settings["scheduler"], positive=handles["encoded"][0],
-                negative=handles["encoded"][1], latent_image=handles["latent"], denoise=settings["denoise"])[0]
+                sampler=settings["sampler"], scheduler=settings["scheduler"], positive=handles["encoded"][0],
+                negative=handles["encoded"][1], latent=handles["latent"], denoise=settings["denoise"],
+                model_name=settings["model"])[0]
         _notify_progress(progress_callback, "decoding")
         handles["decoded"] = nodes.VAEDecode().decode(handles["vae"], handles["sample"])[0]
         pixels = (handles["decoded"][0].detach().to(device="cpu", dtype=torch.float32)

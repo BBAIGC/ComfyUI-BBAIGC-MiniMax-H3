@@ -183,8 +183,9 @@ def _load_image(path):
 def _save_image(image, destination):
     import numpy as np
     from PIL import Image
+    from .output_metadata import save_png
     array = (image[0].detach().cpu().clamp(0, 1).numpy() * 255.0).round().astype(np.uint8)
-    Image.fromarray(array[..., :3], "RGB").save(destination)
+    save_png(Image.fromarray(array[..., :3], "RGB"), destination)
 
 
 def _collect_generated_image(source, destination):
@@ -199,7 +200,13 @@ def _collect_generated_image(source, destination):
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_suffix(".partial.png")
         try:
-            shutil.copyfile(source, temporary)
+            from .output_metadata import current_metadata, save_png
+            if current_metadata():
+                from PIL import Image
+                with Image.open(source) as image:
+                    save_png(image, temporary)
+            else:
+                shutil.copyfile(source, temporary)
             os.replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)
@@ -239,7 +246,7 @@ def _output_root():
 
 def _fingerprint(kwargs, refs, durations):
     excluded = {"继续任务", "重做镜头", "执行范围", "分镜覆盖", "unique_id", "prompt", "extra_pnginfo",
-                "保留分镜计划", "计划编辑", "生图重做范围", "重生图片", "手动分镜图片", "_dialogue_track", "导入优化计划"}
+                "保留分镜计划", "计划编辑", "生图重做范围", "重生图片", "手动分镜图片", "_dialogue_track", "导入优化计划", "视频种子"}
     values = {key: value for key, value in kwargs.items() if key not in excluded}
     values.pop('生图后生成视频',None)
     if values.get('视频短边上限',0)==0:values.pop('视频短边上限',None)
@@ -291,6 +298,9 @@ def _legacy_stage_identity(manifest, kwargs, references, durations, image_settin
     if any(Path(reference["path"]).stat().st_mtime > created_at+1 for reference in references):
         return None
     candidate = dict(kwargs)
+    # Reproduce the old shared-seed task first; a newly selected video-only
+    # seed is compared by the video stage after this compatibility migration.
+    candidate.pop("视频种子", None)
     if manifest.get("dialogue_track") is not None:
         candidate["_dialogue_track"] = copy.deepcopy(manifest["dialogue_track"])
     else:
@@ -957,12 +967,14 @@ class H3StoryboardStudio:
             "手动分镜图片": ("STRING", {"default": "[]"}),
             "导入优化计划": ("STRING", {"default": "{}"}),
             "提示词格式": (["工作台格式", "H3六段式"], {"default": "工作台格式"}),
-            "分镜图长边": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32}),
+            "分镜图长边": ("INT", {"default": 2048, "min": 0, "max": 4096, "step": 32}),
             "参考读取长边": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32}),
             "衔接超分配置": ("STRING", {"default": "{}"}),
             "视频短边上限": ("INT", {"default":0,"min":0,"max":1088,"step":32}),
             "生图后生成视频": ('BOOLEAN',{'default':False}),
-        }, "hidden": {"unique_id": "UNIQUE_ID"}}
+            "视频种子": ("INT", {"default": -1, "min": -1, "max": 2**32 - 1,
+                               "tooltip": "仅用于视频采样；-1沿用原随机种子，不改变规划或分镜图片。"}),
+        }, "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
 
     RETURN_TYPES = ("STRING", "H3_MANUAL_SOURCE")
     RETURN_NAMES = ("任务记录", "分镜生图")
@@ -986,7 +998,9 @@ class H3StoryboardStudio:
         if not _RUN_LOCK.acquire(blocking=False):
             raise RuntimeError("已有分镜任务正在执行，请等待或取消后再运行。")
         try:
-            return self._execute(kwargs)
+            from .output_metadata import execution_metadata
+            with execution_metadata(kwargs.get('prompt'), kwargs.get('extra_pnginfo')):
+                return self._execute(kwargs)
         finally:
             _RUN_LOCK.release()
 
@@ -1021,7 +1035,7 @@ class H3StoryboardStudio:
             kwargs["_text_settings"] = text_settings
         supplied_image_settings = image_settings is not None
         if image_settings is None:
-            image_settings = {"storyboard_long_edge": kwargs.get("分镜图长边", 0),
+            image_settings = {"storyboard_long_edge": kwargs.get("分镜图长边", 2048),
                               "reference_long_edge": kwargs.get("参考读取长边", 0)}
         image_settings = normalize_settings(image_settings)
         kwargs.pop("分镜图长边", None)
@@ -1030,6 +1044,8 @@ class H3StoryboardStudio:
             kwargs["_image_settings"] = image_settings
         if video_settings:
             kwargs.update(video_settings)
+        from .stage_cache import effective_video_seed as resolve_video_seed
+        effective_video_seed = resolve_video_seed(kwargs)
         if kwargs.get("加速权重") == "mystic07 · RefDelta r1024 Turbo8":
             kwargs["加速权重"] = "原作者融合模型"
 
@@ -1169,6 +1185,11 @@ class H3StoryboardStudio:
         from .progress_state import execution_context
         owner=execution_context(kwargs.get('unique_id',''))
         manifest.update(execution_id=uuid.uuid4().hex,progress_seq=0,prompt_id=owner.get('prompt_id'),node_id=owner.get('node_id',str(kwargs.get('unique_id',''))))
+        from .output_metadata import save_workflow_snapshot
+        workflow_path = save_workflow_snapshot(run_dir, manifest['execution_id'])
+        if workflow_path:
+            manifest.setdefault('workflow_snapshots', []).append({'execution_id': manifest['execution_id'],
+                'prompt_id': manifest.get('prompt_id'), 'path': workflow_path})
         manifest["canvas_reference_id"] = canvas_reference["id"] if kwargs["画幅"] == "跟随图片" else None
         manifest.pop("failure_context", None)
         manifest.update(duration_mode=duration_mode, timing_mode=duration_mode)
@@ -1185,6 +1206,8 @@ class H3StoryboardStudio:
                                      for i,item in enumerate(references)]
         manifest["effective_settings"] = {"text": text_settings or {"model": kwargs["语言模型"]},
                                           "image": image_settings,
+                                          "image_seed": int(kwargs["随机种子"]),
+                                          "video_seed": effective_video_seed,
                                           "video": {name: kwargs.get(name) for name in (
                                               "基础模型", "原作者模型", "加速权重", "启用加速LoRA", "加速步数", "标准步数",
                                               "文本编码器", "视频VAE", "音频VAE", "低显存", "稀疏注意力", "4步LoRA", "8步LoRA", "视频采样器", "视频调度器")}}
@@ -1615,7 +1638,7 @@ class H3StoryboardStudio:
                             "_dialogue_offset_seconds": sum(round(round(seconds * 24) / 24 * 32000) for seconds in durations[:i]) / 32000}
                 video, last_frame, report = H3GenerateShot().generate(
                     bundle=selected, prompt=scene["prompt"], width=width, height=height,
-                    seconds=durations[i], steps=steps, seed=(int(kwargs["随机种子"]) + i) % 2**32,
+                    seconds=durations[i], steps=steps, seed=(effective_video_seed + i) % 2**32,
                     audio_mode=plan.get("audio_mode", "模型音频"), continue_previous=False,
                     first_frame=first, last_frame=end_frame,
                     sampler_name=kwargs.get("视频采样器", "res_multistep"), scheduler=kwargs.get("视频调度器", "simple"))
@@ -1639,7 +1662,9 @@ class H3StoryboardStudio:
             destination = _revision_path(run_dir, "完整视频.mp4", manifest)
             partial = destination.with_suffix(".partial.mp4")
             try:
-                joined.save_to(str(partial), format=Types.VideoContainer.MP4, codec=Types.VideoCodec.H264)
+                from .output_metadata import current_metadata
+                joined.save_to(str(partial), format=Types.VideoContainer.MP4, codec=Types.VideoCodec.H264,
+                               metadata=current_metadata())
                 mm.throw_exception_if_processing_interrupted()
                 os.replace(partial, destination)
             finally:

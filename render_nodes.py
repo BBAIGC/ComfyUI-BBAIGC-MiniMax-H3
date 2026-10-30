@@ -157,13 +157,19 @@ class H3RenderShot:
             "随机种子": ("INT", {"default": 42, "min": 0, "max": 2**32-1}),
             "音轨策略": ("STRING", {"forceInput": True}),
             "镜头序号": ("INT", {"default": 1, "min": 1, "max": 3}),
-        }, "optional": {"首帧": ("IMAGE",), "上一镜视频": ("VIDEO",)}}
+        }, "optional": {"首帧": ("IMAGE",), "上一镜视频": ("VIDEO",)},
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
     RETURN_TYPES = ("VIDEO", "IMAGE", "STRING")
     RETURN_NAMES = ("镜头视频", "末帧", "生成记录")
     FUNCTION = "execute"
     CATEGORY = "H3/整稿与分镜"
 
     def execute(self, **kwargs):
+        from .output_metadata import execution_metadata
+        with execution_metadata(prompt=kwargs.pop("prompt", None), extra_pnginfo=kwargs.pop("extra_pnginfo", None)):
+            return self._execute(**kwargs)
+
+    def _execute(self, **kwargs):
         from comfy_api.latest import InputImpl
         bundle = kwargs["视频模型"]
         plan = _plan(bundle["ready_plan"])

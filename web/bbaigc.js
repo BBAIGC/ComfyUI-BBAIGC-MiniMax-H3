@@ -4,6 +4,35 @@ import {api} from '/scripts/api.js';
 const OWN=/^(?:H3|Codex|BBAPI)/;
 const REPOS={h3:'ComfyUI-BBAIGC-MiniMax-H3',image:'ComfyUI-BBAIGC-Image-Studio',bbapi:'ComfyUI-BBAIGC-BBAPI'};
 const element=(tag,text='')=>Object.assign(document.createElement(tag),{textContent:text});
+function legacyIdBadgeWidth(node,ctx){
+ // Mixlab's manager fallback draws this badge in onDrawForeground, outside
+ // LiteGraph's badge layout. Match its actual text and font before reserving
+ // room; source and author badges then keep their normal hit-test rectangles.
+ if(!node.badge_enabled||typeof node.getNickname!=='function'||node.flags?.collapsed||node.constructor.title_mode===window.LiteGraph?.NO_TITLE)return 0;
+ let nickname=node.getNickname();
+ if(nickname==='ComfyUI')nickname='🦊';
+ if(nickname?.length>25)nickname=nickname.substring(0,23)+'..';
+ const text=`#${node.id} ${nickname||''}`;
+ ctx.save();ctx.font='12px sans-serif';
+ try{return ctx.measureText(text).width+12;}finally{ctx.restore();}
+}
+function reserveIdBadgeSpace(node){
+ if(node._bbaigcIdBadgeSpacingInstalled||typeof node.drawBadges!=='function')return;
+ node._bbaigcIdBadgeSpacingInstalled=true;
+ const spacer=new window.LGraphBadge({text:''});
+ let reservedWidth=0;
+ spacer.getWidth=()=>reservedWidth;
+ spacer.draw=()=>{};
+ const draw=node.drawBadges;
+ node.drawBadges=function(ctx){
+  const badges=this.badges;
+  if(!Array.isArray(badges))return draw.apply(this,arguments);
+  const index=badges.indexOf(spacer);if(index>=0)badges.splice(index,1);
+  reservedWidth=legacyIdBadgeWidth(this,ctx);
+  if(reservedWidth>0)badges.push(spacer);
+  return draw.apply(this,arguments);
+ };
+}
 function brand(node){
  if(!OWN.test(node.comfyClass||node.type||''))return;
  node.properties||={};node.properties.bbaigc_author='BBAIGC';
@@ -11,6 +40,7 @@ function brand(node){
   node._bbaigcBadge=new window.LGraphBadge({text:'BBAIGC',fgColor:'#f0ce87',bgColor:'#29251c',fontSize:12,cornerRadius:3});
   node.badges.push(node._bbaigcBadge);
  }
+ if(node._bbaigcBadge)reserveIdBadgeSpace(node);
 }
 function zoom(event){
  if(!event.ctrlKey&&!event.metaKey)return;

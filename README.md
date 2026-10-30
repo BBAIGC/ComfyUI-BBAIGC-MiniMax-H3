@@ -4,7 +4,7 @@
 
 ### 一张参考图＋自由剧本，AI 全自动完成本地视频制作
 
-![版本](https://img.shields.io/badge/版本-V1.2.5-1677ff?style=flat-square)
+![版本](https://img.shields.io/badge/版本-V1.2.11-1677ff?style=flat-square)
 ![ComfyUI](https://img.shields.io/badge/ComfyUI-视频工作流-18181b?style=flat-square)
 ![MiniMax](https://img.shields.io/badge/MiniMax-H3-f59e0b?style=flat-square)
 ![Ollama](https://img.shields.io/badge/Ollama-分镜规划-7c3aed?style=flat-square)
@@ -57,7 +57,9 @@
 | 故事与分镜 | 本地语言模型规划镜头、分配内容，保留可编辑分镜计划 |
 | 提示词 | 按模型规则优化视频提示词，支持前置规则与逐镜调整 |
 | 参考图 | 多图集中上传；图1、参考图2、image 3、ref 1等自动绑定，也支持@；首帧/尾帧与镜头关联 |
-| 分镜生图 | 可用 Qwen Image 2.1 生成分镜，也能逐镜上传自己的图片 |
+| 分镜生图 | Qwen Image 2.1 普通版/Turbo 与采样参数直接可调；分镜原图默认长边 2K，视频再按比例和 480P/720P 等档位适配 |
+| 独立种子 | 分镜与视频各有固定/随机切换，默认随机；固定视频种子后关闭加速，可保留计划和分镜重跑视频 |
+| 工作流恢复 | 新 PNG、单镜 MP4 与合片保存执行时工作流；任务目录另存可导入 JSON，旧无元数据文件不会自动补成当前参数 |
 | 连续生成 | 顺序处理镜头与衔接，减少并行加载带来的资源压力 |
 | 音轨与字幕 | 可选配音、音色分配与字幕处理；按启用能力准备相应依赖 |
 | 复用与重做 | 导入已有分镜计划、针对镜头修改或重新生成，保留已完成进度 |

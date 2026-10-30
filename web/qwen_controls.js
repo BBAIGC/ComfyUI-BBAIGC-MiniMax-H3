@@ -1,6 +1,7 @@
 import {app} from '/scripts/app.js';
 import {changeUpscaleSetting, scalePairs, totalScales} from './reference_upscale.js';
 import {imageModels,modelFamily,cloudCapabilities} from './cloud_models.js';
+import {createImageSamplingControls} from './image_sampling_controls.js';
 
 const field = (node, name) => node?.widgets?.find(value => value.name === name);
 const levels = ['精简', '简洁', '标准', '详细', '极详细'];
@@ -106,6 +107,7 @@ function install(node) {
     root.addEventListener('wheel', event => event.stopPropagation(), {passive:true});
     let disposed = false, mapping = {}, mappingKey = null, refreshers = [], bindings = [], slots = [], applying = false;
     let stateIdentity = null, profileSourceRefresh = () => {}, visibleLoras = 6;
+    const samplingPanels = [];
     const canvasControllers = new Map();
     let seedQueuePending=false;
     const secretInputs = new Set();
@@ -144,6 +146,7 @@ function install(node) {
         if(repair?.type==='CodexQwenStudioRepair'){
             const engine=field(repair,'修复引擎')?.value;
             if(item.widget.startsWith('Image2')&&engine!=='Image2.1')return false;
+            if(item.widget.startsWith('Image2')&&field(repair,'使用外接配置')?.value===true)return false;
             if(item.widget.startsWith('Krea')&&engine!=='Krea 2')return false;
             if(item.widget.startsWith('DLSS')&&engine!=='DLSS5')return false;
             if(engine==='DLSS5'&&['修复规则','补充要求','负面提示词','种子','使用外接配置'].includes(item.widget))return false;
@@ -446,17 +449,67 @@ function install(node) {
         const update=()=>{row.hidden=!condition(item);updateValue();};refreshers.push(update);update();
         return {row,control};
     }
+    function repairSamplingPanel(parent, repair) {
+        const container=el('div');parent.append(container);
+        let current=null,targetIdentity=null;
+        const modelCandidates=(target,modelName,prefix)=>{
+            const native=valuesOf(field(target,modelName));
+            const key=prefix+'模型';
+            if(Array.isArray(native))return native.filter(name=>typeof name==='string'&&(prefix==='Krea'?/krea.*turbo|turbo.*krea/i.test(name):/qwen[-_]?image[-_]?2[._-]?1/i.test(name)));
+            if(!repairWeightCache.has(key)){
+                repairWeightCache.set(key,[]);
+                Promise.allSettled(['UNETLoader','UnetLoaderGGUF'].map(async type=>{const data=await schema(type);return data?.input?.required?.unet_name?.[0]||[];})).then(results=>{
+                    if(disposed)return;
+                    const names=results.filter(result=>result.status==='fulfilled').flatMap(result=>Array.isArray(result.value)?result.value:[]);
+                    repairWeightCache.set(key,[...new Set(names.filter(name=>typeof name==='string'&&(prefix==='Krea'?/krea.*turbo|turbo.*krea/i.test(name):/qwen[-_]?image[-_]?2[._-]?1/i.test(name))))]);
+                    refresh();
+                });
+            }
+            return repairWeightCache.get(key)||[];
+        };
+        const update=()=>{
+            const engine=field(repair,'修复引擎')?.value,external=engine==='Image2.1'&&field(repair,'使用外接配置')?.value===true;
+            container.hidden=!['Image2.1','Krea 2'].includes(engine);
+            let target=repair;
+            if(external){
+                const input=repair.inputs?.find(item=>item.name==='Image2配置');
+                const links=repair.graph?.links,link=links?.get?.(input?.link)||links?.[input?.link];
+                target=repair.graph?.getNodeById(link?.origin_id??link?.[1]);
+            }
+            const identity=container.hidden?'hidden':`${engine}:${external}:${target?.id??'missing'}`;
+            if(targetIdentity!==identity){
+                current?.dispose();current=null;targetIdentity=identity;container.replaceChildren();
+                if(!container.hidden){
+                    if(!target||external&&target.type!=='H3ImageModelSettings')container.append(el('div','qws-status','请连接图像模型配置。'));
+                    else{
+                        const prefix=engine==='Krea 2'?'Krea':'Image2';
+                        const names=external?{model:'图像模型',steps:'步数',cfg:'CFG',denoise:'去噪',sampler:'采样器',scheduler:'调度器'}:
+                            {model:prefix+'模型',steps:prefix+'步数',cfg:prefix+'CFG',denoise:prefix+'降噪',sampler:prefix+'采样器',scheduler:prefix+'调度器'};
+                        if(external)container.append(el('div','qws-status','外接配置'));
+                        current=createImageSamplingControls({node:target,fields:names,modelChoices:()=>modelCandidates(target,names.model,prefix),onChange:()=>{dirty();refresh();}});
+                        container.append(current.element);
+                    }
+                }
+            }
+            current?.refresh();
+        };
+        samplingPanels.push({dispose:()=>current?.dispose()});refreshers.push(update);update();
+    }
     function render() {
         let next;try {next=JSON.parse(config.value||'{}');}catch {root.replaceChildren(el('p','qws-error','控制配置读取失败'));return;}
+        for(const panel of samplingPanels.splice(0))panel.dispose();
         for(const restore of callbackRestorers.splice(0))restore();
         for(const secret of secretInputs)secret.value='';secretInputs.clear();
         mapping=next;mappingKey=config.value;refreshers=[];bindings=[];slots=[];canvasControllers.clear();
         watchRouteCallback();syncOptimizationTarget();
         const fields=(mapping.fields||[]).filter(item=>getField(item));
-        for(const repair of new Set(fields.map(getTarget).filter(owner=>owner?.type==='CodexQwenStudioRepair'))){
-            for(const name of ['DLSS倍率','DLSS强度','DLSS色调','DLSS结构','DLSS皮肤','DLSS细节','DLSS色彩']){
-                if(field(repair,name)&&!fields.some(item=>String(item.node)===String(repair.id)&&item.widget===name))
-                    fields.push({node:repair.id,widget:name,label:name,section:'finish',group:'repair-dlss',group_title:'DLSS5保真增强',condition:{node:repair.id,widget:'修复引擎',equals:'DLSS5'}});
+        const repairs=new Set([...fields.map(getTarget),...(node.graph?._nodes||[])].filter(owner=>owner?.type==='CodexQwenStudioRepair'));
+        for(const repair of repairs){
+            for(const widget of repair.widgets||[]){
+                const name=widget.name;
+                if(name==='修复规则'||/control_after_generate$/.test(name)||!['string','number','boolean'].includes(typeof widget.value)||widget.options?.serialize===false)continue;
+                if(!fields.some(item=>String(item.node)===String(repair.id)&&item.widget===name))
+                    fields.push({node:repair.id,widget:name,label:name,section:'finish'});
             }
         }
         for(const owner of new Set(fields.map(getTarget).filter(owner=>owner?.type==='CodexQwenStudioUpscale'))){const total=field(owner,'总倍率');if(total){total.options||={};total.options.values=field(owner,'超分路线')?.value==='DLSS5→VOSR2'?totalScales('DLSS5→VOSR2'):[1,2,3,4];}}
@@ -469,6 +522,7 @@ function install(node) {
         const targetParent=item=>{
             if(cloudConnection&&cloudNodeIds.has(String(item.node)))return String(item.node)===String(mapping.bbapi_connection_node)?cloudConnection.fields:cloudConnection.params;
             const section=columns[item.section]||columns.base;
+            if(getTarget(item)?.type==='CodexQwenStudioRepair'&&!item.widget.startsWith('DLSS'))return columns.finish;
             if(item.slot||item.section==='lora'){const slot=String(item.slot||String(item.label).match(/LoRA\s*(\d+)/i)?.[1]||1),key=`lora-${slot}`;if(!folds.has(key))folds.set(key,fold(columns.lora,key,`LoRA ${slot}`));return folds.get(key).body;}
             if(item.group){const key=item.section+':'+item.group;if(!folds.has(key))folds.set(key,fold(section,key,item.group_title||item.group));return folds.get(key).body;}
             return section;
@@ -490,8 +544,11 @@ function install(node) {
             const note=el('div','qws-status'),match=el('div','qws-status','LoRA需匹配当前模型'),cloud=el('div','qws-status','BBAPI 使用所选云端模型，不应用本地 LoRA');columns.lora.append(note,match,cloud);
             profileSourceRefresh=()=>{const value=state(),kind=route(),local=kind!=='bbapi';label.hidden=note.hidden=match.hidden=!local;cloud.hidden=local;if(!local)return;buildChoices();select.value=value.sources[kind];const selected=Math.max(0,choices.findIndex(([key])=>key===select.value));for(const{row,indicator,offset}of rows){const active=selected>=offset&&selected<offset+4;indicator.hidden=!active;row.style.setProperty('--selected',String(active?selected-offset:0));}buttons.forEach((button,index)=>{button.setAttribute('aria-checked',String(index===selected));button.tabIndex=index===selected?0:-1;});note.textContent=`${routeNames[kind]} · ${value.sources[kind]==='base'?'基础采样':`LoRA ${value.sources[kind].slice(5)} 采样预设`}`;};
         }else profileSourceRefresh=()=>{};
+        const repairSamplingWidgets=/^(?:Image2|Krea)(?:模型|步数|CFG|降噪|采样器|调度器)$/;
+        const renderedRepairPanels=new Set();
         for(const item of fields){
             const owner=getTarget(item),isCanvas=canvasTypes.has(owner?.type),shown=isCanvas&&item.widget==='最长边上限'?{...item,group:'canvas-limits',group_title:'尺寸上限'}:item;
+            if(owner?.type==='CodexQwenStudioRepair'&&repairSamplingWidgets.test(item.widget))continue;
             const parent=targetParent(shown),created=makeControl(parent,shown);
             if(created&&item.widget==='模型路线'&&cloudConnection)created.row.after(cloudConnection.details);
             if(item.widget==='生成模式'){
@@ -499,7 +556,8 @@ function install(node) {
                 refreshers.push(()=>{const single=['moss','zimage','krea'].includes(route());capability.hidden=!single;capability.textContent=single?'图生图采用单张主图重绘；多图编辑请选择 Qwen 或 BBAPI。':'';});
             }
             if(created&&owner?.type==='CodexQwenStudioRepair'&&item.widget==='修复引擎'){
-                const hint=el('div','qws-status');parent.append(hint);refreshers.push(()=>{const engine=field(owner,'修复引擎')?.value;hint.textContent=engine==='DLSS5'?'保真增强，不调用扩散模型或提示词。先增强，再按所选输出尺寸等比适配。':engine==='Krea 2'?'原图低降噪重绘；建议8步、CFG 1、降噪0.15～0.4。':'保留图片编辑条件，从原图低降噪修复；提高降噪会加大纹理和构图变化。';});
+                const hint=el('div','qws-status');parent.append(hint);refreshers.push(()=>{const engine=field(owner,'修复引擎')?.value;hint.textContent=engine==='DLSS5'?'保真增强，不调用扩散模型或提示词。先增强，再按所选输出尺寸等比适配。':engine==='Krea 2'?'Turbo 原图重绘；降低降噪可减少纹理变化。':'原图重绘；提高降噪会加大纹理和构图变化。';});
+                if(!renderedRepairPanels.has(owner)){repairSamplingPanel(parent,owner);renderedRepairPanels.add(owner);}
             }
             if(created&&['CodexQwenStudioRepair','CodexQwenStudioUpscale'].includes(owner?.type)&&item.widget==='输入尺寸'){
                 const dimensions=el('div','qws-status');parent.append(dimensions);refreshers.push(()=>{const receipt=app.nodeOutputs?.[String(owner.id)]?.codex_input_dimensions?.[0];dimensions.textContent=receipt?`原图 ${receipt.original_width} × ${receipt.original_height} → 处理输入 ${receipt.width} × ${receipt.height}${receipt.output_width?` → 输出 ${receipt.output_width} × ${receipt.output_height}`:''}`:'输入尺寸仅限制长边，不会放大小图。';});
@@ -537,7 +595,7 @@ function install(node) {
     const configured=node.onConfigure;node.onConfigure=function(){const result=configured?.apply(this,arguments);stateIdentity=null;requestAnimationFrame(render);return result;};
     const serialized=node.onSerialize;node.onSerialize=function(saved){syncOptimizationTarget();syncProfiles();const result=serialized?.apply(this,arguments);saved.properties||={};for(const key of ['codex_qwen_sampling_profiles','codex_qwen_folds','codex_seed_modes'])if(node.properties?.[key])saved.properties[key]=JSON.parse(JSON.stringify(node.properties[key]));saved.properties.codex_qwen_visible_loras=node.properties.codex_qwen_visible_loras;return result;};
     const timer=setInterval(()=>{if(disposed||!root.isConnected)return;if(mappingKey!==config.value||!refreshers.length)render();else{syncProfiles();refresh();}},600);
-    const removed=node.onRemoved;node.onRemoved=function(){disposed=true;for(const restore of callbackRestorers.splice(0))restore();for(const secret of secretInputs)secret.value='';secretInputs.clear();clearInterval(timer);observer.disconnect();return removed?.apply(this,arguments);};
+    const removed=node.onRemoved;node.onRemoved=function(){disposed=true;for(const panel of samplingPanels.splice(0))panel.dispose();for(const restore of callbackRestorers.splice(0))restore();for(const secret of secretInputs)secret.value='';secretInputs.clear();clearInterval(timer);observer.disconnect();return removed?.apply(this,arguments);};
     requestAnimationFrame(render);
 }
 

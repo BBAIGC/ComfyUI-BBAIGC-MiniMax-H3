@@ -1,11 +1,11 @@
 {
   "id": "h3",
-  "version": "1.2.5",
+  "version": "1.2.11",
   "author": "BBAIGC",
-  "workflow": "workflows/BBAIGC_h3_V1.2.5.json",
-  "sha256": "af8c24ac2137e17475cd7daa3427888e9f009f245f07a41ced7ec69bf6a8a732",
+  "workflow": "workflows/BBAIGC_h3_V1.2.11.json",
+  "sha256": "0a7e44082a139521c126d7776acff069de0cefb6ac46ed33027d0bcf0715fe87",
   "node_versions": {
-    "core": "1.2.5"
+    "core": "1.2.11"
   },
-  "notes": "修正多参考图槽位与镜头指令优先级；开启超分不再覆盖结构参考策略。"
+  "notes": "恢复完整工作台面板，分镜原图默认长边2K；补齐图像采样控件与独立的视频/分镜固定与随机种子（默认随机）；分镜图和视频保存真实执行工作流，修正作者标签遮挡。"
 }

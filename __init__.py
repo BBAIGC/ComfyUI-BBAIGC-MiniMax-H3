@@ -78,7 +78,7 @@ NODE_CLASS_MAPPINGS.update(_PORTABLE)
 NODE_DISPLAY_NAME_MAPPINGS.update(_PORTABLE_NAMES)
 from .bbaigc_updates import register_update_routes
 register_update_routes()
-__version__ = "1.2.5"
+__version__ = "1.2.11"
 for _class in NODE_CLASS_MAPPINGS.values():
     _class.CATEGORY = "BBAIGC/" + str(getattr(_class, "CATEGORY", "工作台")).split("/", 1)[-1]
 

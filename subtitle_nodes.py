@@ -162,7 +162,9 @@ class H3Subtitles:
                 progress('rendering','正在合成字幕视频')
                 output=source.with_name(source.stem+'_字幕_'+uuid.uuid4().hex[:6]+'.mp4');partial=output.with_suffix('.partial.mp4')
                 filter_path=ass.as_posix().replace(':',r'\:').replace("'",r"\'")
-                try:_ffmpeg(['-i',source,'-vf',f"ass=filename='{filter_path}'",'-c:v','libx264','-crf','18','-preset','fast','-c:a','copy',partial],timeout=1800);partial.replace(output)
+                # Retain the source execution snapshot as MP4 mdta tags and put
+                # moov first so ComfyUI's bounded metadata reader can find it.
+                try:_ffmpeg(['-i',source,'-map_metadata','0','-vf',f"ass=filename='{filter_path}'",'-c:v','libx264','-crf','18','-preset','fast','-c:a','copy','-movflags','use_metadata_tags+faststart',partial],timeout=1800);partial.replace(output)
                 finally:partial.unlink(missing_ok=True)
             relative=output.relative_to(Path(folder_paths.get_output_directory()).resolve())
             descriptor={'filename':relative.name,'subfolder':relative.parent.as_posix(),'type':'output'}

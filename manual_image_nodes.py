@@ -186,7 +186,7 @@ class H3ManualImageStudio:
     def INPUT_TYPES(cls):
         return {"required": {"任务数据": ("STRING", {"default": "{}", "multiline": True})},
                 "optional": {"分镜来源": ("H3_MANUAL_SOURCE",), "图像模型配置": ("H3_IMAGE_SETTINGS",)},
-                "hidden": {"unique_id": "UNIQUE_ID"}}
+                "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("候选记录",)
@@ -200,6 +200,11 @@ class H3ManualImageStudio:
         return float("nan")
 
     def execute(self, **kwargs):
+        from .output_metadata import execution_metadata
+        with execution_metadata(kwargs.get('prompt'), kwargs.get('extra_pnginfo')):
+            return self._execute(**kwargs)
+
+    def _execute(self, **kwargs):
         import comfy.model_management as mm
         raw = kwargs.get("任务数据", "{}")
         try:
@@ -220,6 +225,10 @@ class H3ManualImageStudio:
                 "active_id": None, "error": "", "completed": 0, "total": 0}
         control = {"pause": request["stop_after_current"], "cancel": False, "node_id": node_id}
         try:
+            from .output_metadata import save_workflow_snapshot
+            workflow_path = save_workflow_snapshot(_root(), request['task_id'] + '_' + uuid.uuid4().hex[:12])
+            if workflow_path:
+                data['workflow_snapshot'] = workflow_path
             _merge_previous(request, _read(request["task_id"]))
             targets = [row for row in data["shots"] if row["id"] in request["selection"] and not row["skip"]]
             targets = [row for row in targets if not row["retained"] and
@@ -250,6 +259,17 @@ class H3ManualImageStudio:
                     output = generate_reference(row["prompt"], paths[0], request["width"], request["height"],
                                                 seed=seed, reference_paths=paths[1:], settings=request["image_settings"],
                                                 progress_callback=progress)
+                    from .output_metadata import current_metadata, save_png
+                    if current_metadata():
+                        from PIL import Image
+                        output_path = Path(output)
+                        temporary = output_path.with_name(output_path.stem + '.metadata.png')
+                        try:
+                            with Image.open(output_path) as image:
+                                save_png(image, temporary)
+                            os.replace(temporary, output_path)
+                        finally:
+                            temporary.unlink(missing_ok=True)
                     candidate = {"id": uuid.uuid4().hex, "image": _preview(output), "created_at": time.time(),
                                  "seed": seed, "stale": False}
                     row["candidates"] = (row["candidates"] + [candidate])[-MAX_CANDIDATES:]

@@ -233,7 +233,7 @@ class H3GenerateShot:
             "last_frame": ("IMAGE",),
             "previous_video": ("VIDEO",),
             "previous_last_frame": ("IMAGE",),
-        }}
+        }, "hidden": {"execution_prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
 
     RETURN_TYPES = ("VIDEO", "IMAGE", "STRING")
     RETURN_NAMES = ("镜头视频", "末帧", "生成记录")
@@ -244,7 +244,19 @@ class H3GenerateShot:
     def generate(self, bundle, prompt, width=640, height=384, seconds=10.0,
                  steps=4, seed=42, audio_mode="模型音频", continue_previous=True,
                  first_frame=None, previous_video=None, previous_last_frame=None, last_frame=None,
-                 sampler_name="res_multistep", scheduler="simple"):
+                 sampler_name="res_multistep", scheduler="simple", execution_prompt=None, extra_pnginfo=None):
+        from .output_metadata import execution_metadata
+        # Internal studio calls inherit their execution's snapshot. A standalone
+        # shot receives its own hidden metadata without changing the text prompt.
+        with execution_metadata(prompt=execution_prompt, extra_pnginfo=extra_pnginfo):
+            return self._generate(bundle, prompt, width, height, seconds, steps, seed, audio_mode,
+                                  continue_previous, first_frame, previous_video, previous_last_frame,
+                                  last_frame, sampler_name, scheduler)
+
+    def _generate(self, bundle, prompt, width=640, height=384, seconds=10.0,
+                  steps=4, seed=42, audio_mode="模型音频", continue_previous=True,
+                  first_frame=None, previous_video=None, previous_last_frame=None, last_frame=None,
+                  sampler_name="res_multistep", scheduler="simple"):
         import comfy.model_management as mm
         from comfy_api.latest import InputImpl, Types
         from comfy_extras.nodes_audio import VAEDecodeAudio
@@ -360,8 +372,9 @@ class H3GenerateShot:
                 destination_dir.mkdir(parents=True, exist_ok=True)
                 destination = destination_dir / f"shot_{uuid.uuid4().hex}.mp4"
                 temporary_path = destination.with_suffix(".partial.mp4")
+                from .output_metadata import current_metadata
                 unencoded.save_to(str(temporary_path), format=Types.VideoContainer.MP4,
-                                  codec=Types.VideoCodec.H264)
+                                  codec=Types.VideoCodec.H264, metadata=current_metadata())
                 mm.throw_exception_if_processing_interrupted()
                 os.replace(temporary_path, destination)
                 temporary_path = None

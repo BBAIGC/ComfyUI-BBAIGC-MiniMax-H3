@@ -597,7 +597,7 @@ class CodexQwenStudioRepair:
         }
         optional = {
             'Image2配置': ('H3_IMAGE_SETTINGS', {'lazy': True}),
-            '使用外接配置': ('BOOLEAN', {'default': False, 'tooltip': '默认独立设置；启用后Image2.1使用外接配置的模型和采样参数。'}),
+            '使用外接配置': ('BOOLEAN', {'default': False, 'tooltip': '关闭时使用修复独立参数；启用时面板调整连接的图像模型配置，模型和降噪均以外接配置为准。'}),
             'Image2模型': ('STRING', {'default': 'qwen-image-2.1-UC-Q6_K.gguf'}),
             'Image2编码器': ('STRING', {'default': 'qwen3vl_8b_int8_convrot.safetensors'}),
             'Image2VAE': ('STRING', {'default': 'qwen_image_2.1_vae_bf16.safetensors'}),
@@ -720,7 +720,7 @@ class CodexQwenStudioRepair:
             raise ValueError('请填写修复规则或补充要求。')
         settings = {'engine': 修复引擎, 'rules': 修复规则, 'extra': 补充要求, 'negative': 负面提示词,
                     'seed': 种子, 'config': cfg, 'input': [输入尺寸, 输入长边], 'output': [width, height]}
-        key = _cache_key('qwen-studio-repair-v4', prepared, settings, _model_stamps(names))
+        key = _cache_key('qwen-studio-repair-v5', prepared, settings, _model_stamps(names))
         cached = _cached_image(key)
         if cached:
             return self._preview(load_tensor(cached), dimensions=dimensions)

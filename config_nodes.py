@@ -146,7 +146,7 @@ class H3ImageModelSettings:
             "缓存精度": (["default", "int8", "int4"], {"default": "default"}),
             "编码器设备": (["default", "cpu"], {"default": "default"}),
         }, "optional": {
-            "分镜图长边": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32,
+            "分镜图长边": ("INT", {"default": 2048, "min": 0, "max": 4096, "step": 32,
                                     "tooltip": "0跟随视频尺寸；较大值先生成更清晰的AI分镜原图，再适配视频尺寸。仅影响AI分镜及结束帧，不改变独立生图和末帧修复尺寸。"}),
             "上镜参考策略": (["完整参考（兼容）", "结构参考（原图细节优先）"], {"default": "完整参考（兼容）",
                             "tooltip": "结构参考限制上一张AI分镜的细节输入，原始素材继续提供身份、肤质及材质；仅影响AI分镜及结束帧。"}),
@@ -175,7 +175,7 @@ class H3ImageModelSettings:
             "cache_device": _selected(kwargs["缓存设备"], ["auto", "gpu", "cpu", "off"], "缓存设备"),
             "cache_dtype": _selected(kwargs["缓存精度"], ["default", "int8", "int4"], "缓存精度"),
             "clip_device": _selected(kwargs.get("编码器设备", "default"), ["default", "cpu"], "编码器设备"),
-            "storyboard_long_edge": _number(kwargs.get("分镜图长边", 0), 0, 4096, "分镜图长边", True),
+            "storyboard_long_edge": _number(kwargs.get("分镜图长边", 2048), 0, 4096, "分镜图长边", True),
             "reference_long_edge": _number(kwargs.get("参考读取长边", 0), 0, 4096, "参考读取长边", True),
             "previous_reference_policy": _selected(kwargs.get("上镜参考策略", "完整参考（兼容）"),
                                                    ["完整参考（兼容）", "结构参考（原图细节优先）"], "上镜参考策略"),
