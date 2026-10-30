@@ -8,7 +8,7 @@ import { createReferenceUpscalePanel } from "./reference_upscale.js";
 import {fileKind,decodeScript,downloadPlan,updateIdentity} from './plan_files.js';
 import {attachSpeechInput} from './speech_input.js';
 import {createImageSamplingControls} from './image_sampling_controls.js';
-import {seedMode,setSeedMode,prepareH3Seed,currentH3Seed,setH3Seed,imageSeedMode,setImageSeedMode,currentH3ImageSeed,prepareH3ImageSeed} from './h3_seed.js';
+import {seedMode,setSeedMode,prepareH3Seed,currentH3Seed,setH3Seed,imageSeedMode,setImageSeedMode,currentH3ImageSeed,prepareH3ImageSeed,randomH3SceneSeed} from './h3_seed.js';
 
 const TYPE = "H3StoryboardStudio";
 const CONFIG_TYPES=new Set(["H3TextModelSettings","H3ImageModelSettings","H3VideoModelSettings"]);
@@ -17,6 +17,7 @@ const MAX_REFERENCES = 101;
 const MODES = ["逐镜参考图", "上一镜末帧", "AI生成分镜", "手动分镜图", "末帧高清续接"];
 const MODE_LABELS = ["逐镜生成", "末帧续接", "AI分镜", "手动分镜", "高清续接"];
 const PROMPT_FORMATS = ["工作台格式", "H3六段式"];
+const VIDEO_INPUTS = ['图生视频','文生视频'];
 const VIDEO_ONLY_FIELDS=new Set(["启用加速LoRA","加速权重","加速步数","标准步数","基础模型","原作者模型","文本编码器","视频VAE","音频VAE","视频采样器","视频调度器","稀疏注意力","低显存","完成后","视频种子"]);
 const STATUS = { pending: "等待中", waiting: "等待中", running: "生成中", generating: "生成中", completed: "已完成", done: "已完成", ready: "已就绪", prepared: "分镜图已就绪", failed: "失败", error: "失败", cancelled: "已取消", interrupted: "已中断", "等待":"等待中", "准备图片":"准备图片", "图片就绪":"图片已就绪", "修复末帧":"修复末帧", "生成中":"生成中", "完成":"已完成", "失败":"失败", "已取消":"已取消" };
 const STAGES = { planning: "规划分镜", planned:"剧本已优化", manual_waiting:"等待手动分镜图片", images: "生成分镜图", image: "生成分镜图", images_ready:"分镜图已就绪", end_image:"生成结束图", repair:"修复末帧", restoring: "修复衔接帧", loading: "加载视频模型", video: "生成视频", joining: "合成完整视频", cleanup: "释放模型", prepared: "分镜图已就绪", completed: "已完成", done: "已完成" };
@@ -32,6 +33,9 @@ function installStyle() {
       .h3-studio section {padding:10px 0;border-top:1px solid var(--border-color,#555)}
       .h3-studio section:first-child {border-top:0;padding-top:0}
       .h3-studio .h3-row {display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+      .h3-studio .h3-duration-mode.h3-video-input {width:100%;max-width:none;flex-basis:auto;margin:0 0 10px;height:36px}
+      .h3-studio .h3-video-input button {font-size:14px}
+      .h3-studio[data-text-video=true] .h3-text-video-hidden {display:none!important}
       .h3-studio .h3-seed-control {display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px;align-items:center;margin:8px 0}
       .h3-studio .h3-seed-control input {width:100%;min-width:0}
       .h3-studio .h3-seed-control .h3-duration-mode {width:100%;max-width:none;grid-column:2}
@@ -548,6 +552,7 @@ function restoreAddedWidgetValues(node,saved,imageConfig=false){
         "参考读取长边":{fallback:0,property:"h3_reference_long_edge",valid:value=>Number.isInteger(value)&&value>=0&&value<=4096&&value%32===0},
         "上镜参考策略":{fallback:"完整参考（兼容）",valid:value=>["完整参考（兼容）","结构参考（原图细节优先）"].includes(value)},
     }:{
+        "视频输入":{fallback:'图生视频',property:'h3_video_input',valid:value=>VIDEO_INPUTS.includes(value)},
         "视频种子":{fallback:-1,property:"h3_video_seed",valid:value=>Number.isInteger(value)&&value>=-1&&value<=4294967295},
         "生图后生成视频":{fallback:false,property:"h3_auto_video",valid:value=>typeof value==='boolean'},
         "视频短边上限":{fallback:0,property:"h3_video_short_edge",valid:value=>Number.isInteger(value)&&value>=0&&value<=1088&&value%32===0},
@@ -687,6 +692,7 @@ function setupStudio(node,nodeData) {
     }
     const propertyFields={"画幅参考图":"h3_aspect_reference","导入优化计划":"h3_imported_plan","提示词格式":"h3_prompt_format","衔接超分配置":"h3_reference_upscale","分镜图长边":"h3_image_long_edge","参考读取长边":"h3_reference_long_edge","视频短边上限":"h3_video_short_edge","生图后生成视频":"h3_auto_video"};
     const value = (name, fallback) => upstreamWidget(name)?.value ?? widgets.get(name)?.value ?? node.properties?.[propertyFields[name]] ?? fallback;
+    function isTextVideo(){return (widgets.get('视频输入')?.value??node.properties?.h3_video_input??'图生视频')==='文生视频';}
     let disposed = false;
     let syncing = false;
     let references = [];
@@ -752,6 +758,7 @@ function setupStudio(node,nodeData) {
     root.addEventListener("keydown",event=>{const editing=event.target.closest("input,textarea,select,[contenteditable=true]");if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="m"&&!editing)return;event.stopPropagation();});
 
     function write(name, next) {
+        if(name==='视频输入'){node.properties||={};node.properties.h3_video_input=next;}
         if(name==='视频种子'){node.properties||={};node.properties.h3_video_seed=next;}
         if(name==='生图后生成视频'){node.properties||={};node.properties.h3_auto_video=!!next;}
         if(name==="画幅参考图"){node.properties||={};node.properties.h3_aspect_reference=String(next||"图1");}
@@ -779,6 +786,7 @@ function setupStudio(node,nodeData) {
         renderPreview();
     }
     function bindDraftReferences(text=textarea.value,removedIds=[],previousEntries=references){
+        if(isTextVideo()){write('剧本',String(text));return {references,script:String(text),bindings:referenceBindings};}
         const raw=String(text),start=textarea.selectionStart,end=textarea.selectionEnd,active=document.activeElement===textarea;
         const result=reconcileH3References(references,raw,referenceBindings,{previousEntries,removedIds});
         references=result.references;referenceBindings=result.bindings;node.properties||={};node.properties.h3_reference_bindings=referenceBindings;node.properties.h3_ref_serial=references.length;
@@ -900,7 +908,7 @@ function setupStudio(node,nodeData) {
     const scriptBar = el("div", "h3-row");
     scriptBar.append(el("strong", "h3-grow", "原始剧本"), el("span", "h3-muted", "图1／image 1 自动识别 · Ctrl+V 粘贴图片"));
     const editor = el("div", "h3-editor");
-    const textarea = createScriptEditor(()=>references,{getBindings:()=>referenceBindings});
+    const textarea = createScriptEditor(()=>isTextVideo()?[]:references,{getBindings:()=>isTextVideo()?null:referenceBindings});
     const importScript=el('button','','导入剧本'),scriptFile=el('input');importScript.type='button';scriptFile.type='file';scriptFile.accept='.txt,.md,.markdown,.text';scriptFile.hidden=true;importScript.onclick=()=>scriptFile.click();scriptFile.onchange=()=>readWorkspaceFile(scriptFile.files[0]).finally(()=>{scriptFile.value='';});scriptBar.append(importScript,scriptFile);
     const picker = el("div", "h3-picker");
     picker.setAttribute("role", "listbox"); picker.setAttribute("aria-label", "选择参考图"); picker.hidden = true;
@@ -980,6 +988,9 @@ function setupStudio(node,nodeData) {
     optimizedScript.addEventListener("blur",()=>{if(!disposed&&root.isConnected)renderOptimizedPlan();});
 
     const settingsSection = el("section");
+    const videoInputBar=el('div','h3-duration-mode h3-video-input'),videoInputIndicator=el('span','h3-duration-indicator'),videoInputButtons=new Map();
+    videoInputBar.setAttribute('role','radiogroup');videoInputBar.setAttribute('aria-label','视频输入');videoInputBar.append(videoInputIndicator);
+    for(const mode of VIDEO_INPUTS){const button=el('button','',mode);button.type='button';button.setAttribute('role','radio');button.onclick=()=>switchVideoInput(mode);button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const target=event.key==='Home'?VIDEO_INPUTS[0]:event.key==='End'?VIDEO_INPUTS[1]:mode===VIDEO_INPUTS[0]?VIDEO_INPUTS[1]:VIDEO_INPUTS[0];videoInputButtons.get(target).click();videoInputButtons.get(target).focus();};videoInputButtons.set(mode,button);videoInputBar.append(button);}
     const modeRow = el("div", "h3-row");
     const modeSelect = el("div", "h3-modes");modeSelect.setAttribute("role","radiogroup");modeSelect.setAttribute("aria-label","参考图模式");
     modeSelect.style.setProperty("--h3-mode-count",String(MODES.length));
@@ -1087,7 +1098,7 @@ function setupStudio(node,nodeData) {
         if(!edge)edge=canvas?.width&&canvas?.height?Math.max(canvas.width,canvas.height):({"384P":384,"480P":480,"720P":720,"1080P":1080}[value("生成档位","480P")]||480)*Math.max(ratio,1/ratio);
         return {input:[Math.max(32,Math.round((ratio>=1?edge:edge*ratio)/32)*32),Math.max(32,Math.round((ratio>=1?edge/ratio:edge)/32)*32)],estimatedInput:true};
     }
-    const referenceUpscale=createReferenceUpscalePanel({read:()=>value("衔接超分配置","{}"),write:next=>writeImageSetting("衔接超分配置",next),isBusy:()=>["running","generating"].includes(snapshot?.status)||queueing,isActive:()=>modeSelect.value==="AI生成分镜",dimensions:referenceUpscaleDimensions});
+    const referenceUpscale=createReferenceUpscalePanel({read:()=>value("衔接超分配置","{}"),write:next=>writeImageSetting("衔接超分配置",next),isBusy:()=>["running","generating"].includes(snapshot?.status)||queueing,isActive:()=>!isTextVideo()&&modeSelect.value==="AI生成分镜",dimensions:referenceUpscaleDimensions});
     configDetails.append(el("summary", "", "高级设置与备用模型"),configGrid);
     const connectionLines=new Map();const modelConnections=el("div","h3-models");
     for(const[kind,label]of[["text","文本"],["image","图像"],["video","视频"],["rules","规则"]]){const row=el("div","h3-model-line");const name=el("span","h3-grow");row.append(el("strong","",label),name);connectionLines.set(kind,name);modelConnections.append(row);}
@@ -1159,6 +1170,7 @@ function setupStudio(node,nodeData) {
     const actionRow = el("div", "h3-row");
     const continueButton = el("button", "", "继续生成视频");
     const redoButton = el("button", "", "重做本镜");
+    redoButton.title='随机模式更换本镜的视频种子；固定模式沿用本镜种子。已完成的其他独立镜头保留。末帧续接时，后续依赖镜头也需重做。';
     const actionState = el("span", "h3-muted h3-grow");
     actionRow.append(continueButton, redoButton, actionState);
     const finalBox = el("div", "h3-final");
@@ -1221,7 +1233,7 @@ function setupStudio(node,nodeData) {
     const workspace=el("div","h3-workspace");const sourceColumn=el("div","h3-column h3-source-column");const resultColumn=el("div","h3-column h3-result-column");
     const sourceSplitter=makeSplitter("source"),imageSplitter=makeSplitter("image");
     const deckBridgeTop=el("span","h3-deck-bridge"),deckBridgeBottom=el("span","h3-deck-bridge");imageSplitter.append(deckBridgeTop,deckBridgeBottom);
-    const sourceScroll=el("div","h3-source-scroll");sourceScroll.title="滚轮滚动设置，也可拖动右侧滚动条。";sourceScroll.append(referenceSection,scriptSection,settingsSection);sourceColumn.append(sourceScroll,releaseSection);resultColumn.append(optimizedSection,previewSection);workspace.append(sourceColumn,sourceSplitter,resultColumn,imageSplitter,imageColumn);root.append(layoutBar,workspace);
+    const sourceScroll=el("div","h3-source-scroll");sourceScroll.title="滚轮滚动设置，也可拖动右侧滚动条。";sourceScroll.append(videoInputBar,referenceSection,scriptSection,settingsSection);sourceColumn.append(sourceScroll,releaseSection);resultColumn.append(optimizedSection,previewSection);workspace.append(sourceColumn,sourceSplitter,resultColumn,imageSplitter,imageColumn);root.append(layoutBar,workspace);
     for(const column of[sourceColumn,resultColumn,imageColumn])column.title="内容区滚动 · 空白处滚轮缩放画布";
     function panelHeight(){return 440;}
     function layoutMinimumSize(){return [activeLayout==="horizontal"?(imagePlanningMode()?1200:760):560,540];}
@@ -1298,7 +1310,8 @@ function setupStudio(node,nodeData) {
     function prepareReferences(){
         if(disposed||node.mode===2||node.mode===4)return true;
         if(isManualMode())write("保留分镜计划",true);
-        const sizingError=imageSizeError(),upscaleError=referenceUpscale.validate();
+        const textVideo=isTextVideo();if(textVideo)textVideoWeights();
+        const sizingError=textVideo?'':imageSizeError(),upscaleError=textVideo?'':referenceUpscale.validate();
         if(sizingError||upscaleError){const target=sizingError?imageSizing:referenceUpscale.element;preflightFailure={stage:"settings",field:sizingError?"分镜图长边":"衔接超分配置",message:sizingError||upscaleError};renderImageSizing();referenceUpscale.render();renderFailure();target.scrollIntoView({block:"nearest",inline:"nearest"});return false;}
         if(typeof node.properties?.h3_optimized_import_text==="string"){
             const imported=importedPlanData(),error=importedPlanError(imported);
@@ -1307,8 +1320,11 @@ function setupStudio(node,nodeData) {
             imported.optimized_script=node.properties.h3_optimized_import_text;write("导入优化计划",JSON.stringify(imported));write("保留分镜计划",true);write("继续任务","");write("重做镜头",0);write("计划编辑","{}");write("分镜覆盖","{}");write("重生图片","[]");write("生图重做范围","保留现有图片");node.properties.h3_import_submitted=true;preflightFailure=null;renderFailure();return true;
         }
         preflightFailure=null;
-        if(!references.length){preflightFailure={stage:"settings",field:"参考图集",message:"请先添加参考图",suggestion:"点击参考图区的添加按钮，或拖入、粘贴图片。"};renderFailure();gallery.scrollIntoView({block:"nearest",inline:"nearest"});return false;}
-        const result=normalizeReferenceMentions(textarea.value,references.length);
+        if(textVideo&&!textarea.value.trim()){preflightFailure={stage:'settings',field:'剧本',message:'请先填写剧本。'};renderFailure();textarea.focus();return false;}
+        if(textVideo&&/@(?:图|参考图)\s*\d+|<Picture\s+\d+>/i.test(textarea.value)){preflightFailure={stage:'settings',field:'剧本',message:'文生视频不使用图片引用，请将图号改为人物、动作和场景描述。'};renderFailure();textarea.focus();return false;}
+        if(textVideo&&value('画幅','跟随图片')==='跟随图片'){preflightFailure={stage:'settings',field:'画幅',message:'文生视频请选择明确画幅或自定义尺寸。'};renderFailure();return false;}
+        if(!textVideo&&!references.length){preflightFailure={stage:"settings",field:"参考图集",message:"请先添加参考图",suggestion:"点击参考图区的添加按钮，或拖入、粘贴图片。"};renderFailure();gallery.scrollIntoView({block:"nearest",inline:"nearest"});return false;}
+        const result=textVideo?{changed:false,valid:true,script:textarea.value}:normalizeReferenceMentions(textarea.value,references.length);
         if(result.changed){textarea.value=result.script;bindDraftReferences();renderMentions();if(!["running","generating"].includes(snapshot?.status))invalidateSource();}
         if(result.valid){delete gallery.dataset.referenceError;textarea.removeAttribute("aria-invalid");uploadState.classList.remove("h3-reference-error");if(uploadState.dataset.referenceError){uploadState.textContent="";delete uploadState.dataset.referenceError;}
             if(value("时长模式","手动设置")==="AI自动分配"){
@@ -1334,8 +1350,41 @@ function setupStudio(node,nodeData) {
         invalidateSource();
     }
     function sceneCount() {return Math.max(durations.length, snapshot?.scene_count || 0, snapshot?.scenes?.length || 0, 1);}
-    function isManualMode(){return modeSelect.value==="手动分镜图";}
-    function aiImageEditingMode(){return modeSelect.value==="AI生成分镜"&&!!value("保留分镜计划",false)&&!!snapshot?.run_id&&!draftChanged;}
+    function preserveInputDraft(mode){
+        node.properties||={};node.properties.h3_video_input_drafts||={};
+        node.properties.h3_video_input_drafts[mode]={fields:Object.fromEntries(['分镜覆盖','计划编辑','导入优化计划','重生图片','生图重做范围','保留分镜计划'].map(name=>[name,value(name)])),optimized:node.properties.h3_optimized_import_text,planDraft:node.properties.h3_plan_edit_draft};
+    }
+    function textVideoWeights(restore=false){
+        node.properties||={};const backups=node.properties.h3_text_video_weights||{};
+        if(restore){for(const[id,prior]of Object.entries(backups)){const source=id==='self'?node:node.graph?.getNodeById?.(Number(id))??node.graph?.getNodeById?.(id);const widget=source?.widgets?.find(item=>item.name==='加速权重');if(widget&&widget.value==='独立LoRA'){widget.value=prior;if(widget.inputEl)widget.inputEl.value=String(prior);}}delete node.properties.h3_text_video_weights;return;}
+        if(!isTextVideo())return;
+        for(const source of new Set([node,configSource('video')].filter(Boolean))){const widget=source.widgets?.find(item=>item.name==='加速权重');if(!widget)continue;const id=source===node?'self':String(source.id);if(!(id in backups))backups[id]=widget.value;if(widget.value!=='独立LoRA'){widget.value='独立LoRA';if(widget.inputEl)widget.inputEl.value='独立LoRA';source.graph?.setDirtyCanvas?.(true,true);}}
+        node.properties.h3_text_video_weights=backups;
+    }
+    function switchVideoInput(next){
+        if(!VIDEO_INPUTS.includes(next)||queueing||['running','generating'].includes(snapshot?.status))return;
+        const previous=isTextVideo()?'文生视频':'图生视频';if(previous===next)return;
+        preserveInputDraft(previous);node.properties||={};
+        if(next==='文生视频'){node.properties.h3_image_video_aspect=value('画幅','跟随图片');node.properties.h3_image_video_mode=modeSelect.value;write('画幅',node.properties.h3_text_video_aspect||'16:9 横屏');}
+        else{node.properties.h3_text_video_aspect=value('画幅','16:9 横屏');textVideoWeights(true);write('画幅',node.properties.h3_image_video_aspect||'跟随图片');}
+        write('视频输入',next);connectionSignature='';connectionData=null;invalidateSource();
+        delete node.properties.h3_optimized_import_text;write('导入优化计划','{}');
+        const draft=node.properties.h3_video_input_drafts[next];if(draft){for(const[name,nextValue]of Object.entries(draft.fields||{}))if(nextValue!==undefined)write(name,nextValue);if(typeof draft.optimized==='string')node.properties.h3_optimized_import_text=draft.optimized;if(draft.planDraft!==undefined)node.properties.h3_plan_edit_draft=draft.planDraft;}
+        write('继续任务','');write('重做镜头',0);textVideoWeights();if(!isTextVideo())renderReferences();renderMode();renderPreview();refreshModelConnections(false);node.graph?.setDirtyCanvas?.(true,true);
+    }
+    function renderVideoInput(){
+        const text=isTextVideo(),busy=queueing||['running','generating'].includes(snapshot?.status);root.dataset.textVideo=String(text);
+        videoInputIndicator.style.transform=`translateX(${text?100:0}%)`;for(const[mode,button]of videoInputButtons){button.setAttribute('aria-checked',String((mode==='文生视频')===text));button.tabIndex=((mode==='文生视频')===text)?0:-1;button.disabled=busy||!widgets.has('视频输入');}
+        for(const element of[referenceSection,modeRow,modeHint,imageSampling,imageSizing,imageSizingNote,imageSizingError,imageSeedRow,autoVideoRow,referenceUpscale.element])element.classList.add('h3-text-video-hidden');
+        for(const name of['镜头衔接','末帧处理','适配方式','执行范围','原作者模型'])configFields.get(name)?.classList.add('h3-text-video-hidden');
+        scriptBar.querySelector('.h3-muted')?.classList.add('h3-text-video-hidden');
+        textarea.title=text?'输入人物、场景、动作与对白。':'图1、参考图2或image 3自动关联；也可用@选择参考图。';scriptBar.title=text?'原始视频剧本':'直接输入图号自动关联，也支持粘贴参考图。';
+        connectionLines.get('image')?.parentElement?.classList.add('h3-text-video-hidden');
+        const weight=configControls.get('加速权重');if(weight){for(const option of weight.options||[])option.disabled=text&&option.value!=='独立LoRA';weight.disabled=busy||text;}
+        aspectButtons.get('跟随图片').hidden=text;if(text)aspectPicker.hidden=true;
+    }
+    function isManualMode(){return !isTextVideo()&&modeSelect.value==="手动分镜图";}
+    function aiImageEditingMode(){return !isTextVideo()&&modeSelect.value==="AI生成分镜"&&!!value("保留分镜计划",false)&&!!snapshot?.run_id&&!draftChanged;}
     function imageEditingMode(){return isManualMode()||aiImageEditingMode();}
     function imageEditSlots(){try{const raw=JSON.parse(String(value("手动分镜图片","[]")));return Array.isArray(raw)?raw.slice(0,sceneCount()+1):[];}catch{return[];}}
     function storyboardImage(index){
@@ -1344,7 +1393,7 @@ function setupStudio(node,nodeData) {
         if(entry&&snapshot?.run_id&&entry._run_id===snapshot.run_id&&snapshot.image_edit_receipts?.[String(index)]!==entry._edit_id)return entry.clear?null:normalizeManualImage(entry);
         return index===sceneCount()?snapshot?.scenes?.at(-1)?.end_image||null:sceneAt(index)?.image||null;
     }
-    function imagePlanningMode(){return ["AI生成分镜","手动分镜图","末帧高清续接"].includes(modeSelect.value);}
+    function imagePlanningMode(){return !isTextVideo()&&["AI生成分镜","手动分镜图","末帧高清续接"].includes(modeSelect.value);}
     function manualImages(){
         try{const raw=JSON.parse(String(value("手动分镜图片",node.properties?.h3_manual_images||"[]")));return Array.isArray(raw)?Array.from({length:sceneCount()+1},(_,index)=>normalizeManualImage(raw[index])):[];}catch{return[];}
     }
@@ -1465,7 +1514,7 @@ function setupStudio(node,nodeData) {
     }
     function exportedPlanData(){
         const data=typeof node.properties?.h3_optimized_import_text==="string"?importedPlanData():snapshot?.plan_export||importedPlanData();if(data?.schema!=="h3-plan/1"||!data.plan||!Array.isArray(data.durations))return null;
-        return {...data,source_script:data.plan.raw_script??textarea.value,reference_files:data.reference_files||references.map(item=>({...item,type:'input'})),canvas_settings:Object.fromEntries(['画幅','画幅参考图','生成档位','视频短边上限','适配方式','镜头衔接','分镜图长边','参考读取长边','生图后生成视频'].map(name=>[name,value(name)])),prompt_format:data.prompt_format??data.plan.prompt_format??PROMPT_FORMATS[0],optimized_script:optimizedScript.value};
+        return {...data,...(isTextVideo()?{input_mode:'T2VA',mode:'文生视频'}:{}),source_script:data.plan.raw_script??textarea.value,reference_files:isTextVideo()?[]:data.reference_files||references.map(item=>({...item,type:'input'})),canvas_settings:Object.fromEntries(['视频输入','画幅','画幅参考图','生成档位','视频短边上限','适配方式','镜头衔接','分镜图长边','参考读取长边','生图后生成视频'].map(name=>[name,name==='视频输入'?(isTextVideo()?'文生视频':'图生视频'):value(name)])),prompt_format:data.prompt_format??data.plan.prompt_format??PROMPT_FORMATS[0],optimized_script:optimizedScript.value};
     }
     async function localPlanRequest(path,body){
         const response=await api.fetchApi(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});const data=await response.json();if(!response.ok)throw Error(data.error||'分镜文件处理失败。');return data;
@@ -1487,13 +1536,14 @@ function setupStudio(node,nodeData) {
             if(kind==='script'){textarea.value=decodeScript(buffer);scriptChanged();actionState.textContent=`已读取剧本：${file.name}`;return;}
             if(queueing||['running','generating'].includes(snapshot?.status))throw Error('请先停止当前任务，再导入另一套分镜。');
             const payload=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(buffer).replace(/^\uFEFF/,''));
-            const result=await localPlanRequest('/h3-director/plan/import',{payload,references});const imported=result.payload;
-            if(!MODES.includes(imported.mode||'AI生成分镜'))throw Error('文件中的生成模式不受支持。');
+            const inputError=planInputError(payload);if(inputError)throw Error(inputError);
+            const result=await localPlanRequest('/h3-director/plan/import',{payload,references:isTextVideo()?[]:references,input_mode:isTextVideo()?'T2VA':'I2V'});const imported=result.payload;
+            if(!isTextVideo()&&!MODES.includes(imported.mode||'AI生成分镜'))throw Error('文件中的生成模式不受支持。');
             for(const[name,next]of Object.entries(imported.canvas_settings||{})){if(!['画幅','画幅参考图','生成档位','视频短边上限','适配方式','镜头衔接','分镜图长边','参考读取长边','生图后生成视频'].includes(name)||next===undefined)continue;const upstream=upstreamWidget(name);if(upstream){upstream.value=next;upstream.callback?.(next);}write(name,next);}
-            references=result.references;write('参考图集',JSON.stringify(references));write('剧本',imported.source_script??imported.plan.raw_script??'');write('生成模式',imported.mode||'AI生成分镜');write('声音模式',imported.plan.speech_mode);write('提示词格式',imported.prompt_format??imported.plan.prompt_format??PROMPT_FORMATS[0]);write('分镜数量',imported.durations.length);write('时长模式','手动设置');write('每镜秒数',imported.durations.join(','));write('目标总秒数',imported.durations.reduce((a,b)=>a+b,0));write('执行范围','完整生成');
+            if(!isTextVideo()){references=result.references;write('参考图集',JSON.stringify(references));write('生成模式',imported.mode||'AI生成分镜');}write('剧本',imported.source_script??imported.plan.raw_script??'');write('声音模式',imported.plan.speech_mode);write('提示词格式',imported.prompt_format??imported.plan.prompt_format??PROMPT_FORMATS[0]);write('分镜数量',imported.durations.length);write('时长模式','手动设置');write('每镜秒数',imported.durations.join(','));write('目标总秒数',imported.durations.reduce((a,b)=>a+b,0));write('执行范围','完整生成');
             syncFromWidgets();acceptOptimizedPaste(imported.optimized_script,optimizedClipboardHTML(imported.optimized_script,imported));
             if(preflightFailure)throw Error(preflightFailure.message);
-            actionState.textContent='完整计划已读取，原始剧本已恢复；点击运行直接生图，不再调用AI优化。';
+            actionState.textContent=isTextVideo()?'完整计划已读取，点击运行直接生成视频。':'完整计划已读取，原始剧本已恢复；点击运行直接生图，不再调用AI优化。';
         }catch(error){actionState.textContent=error.message||'文件无法读取。';}
     }
     root.addEventListener('dragover',event=>{if(!Array.from(event.dataTransfer?.types||[]).includes('Files'))return;event.preventDefault();root.dataset.fileDrop='true';},{capture:true,signal:controller.signal});
@@ -1519,16 +1569,19 @@ function setupStudio(node,nodeData) {
         }catch{}
         actionState.textContent="请在总览中按Ctrl+V粘贴已优化的完整分镜稿。";
     }
+    function planInputError(data){const mode=data?.plan?.input_mode??data?.input_mode??'I2V';if(data?.input_mode&&data?.plan?.input_mode&&data.input_mode!==data.plan.input_mode)return '优化稿的视频输入格式不一致。';const text=mode==='T2VA'||mode==='T2V';return text!==isTextVideo()?`优化稿为${text?'文生视频':'图生视频'}，请先切换到相同视频输入。`:'';}
     function importedPlanError(data){
         if(!data)return "请使用总览的复制按钮保留完整分镜数据，再粘贴优化稿。";
         if(data.schema!=="h3-plan/1"||!data.plan||!Array.isArray(data.plan.scenes)||!Array.isArray(data.durations)||data.durations.length<1||data.durations.length>MAX_SCENES)return "优化稿分镜数据不完整，请重新复制完整总览。";
+        const inputError=planInputError(data);if(inputError)return inputError;
         const format=data.prompt_format??data.plan.prompt_format??PROMPT_FORMATS[0];if(format!==value("提示词格式",PROMPT_FORMATS[0]))return `优化稿使用“${format}”，请先切换到相同提示词格式。`;
-        if(data.mode&&data.mode!==modeSelect.value)return `优化稿使用“${data.mode}”，请先切换到相同模式。`;
+        if(!isTextVideo()&&data.mode&&data.mode!==modeSelect.value)return `优化稿使用“${data.mode}”，请先切换到相同模式。`;
         if(data.plan.speech_mode&&data.plan.speech_mode!==value("声音模式","自动识别原稿"))return `优化稿声音模式为“${data.plan.speech_mode}”，请先使用相同声音模式。`;
         if(data.durations.length!==durations.length)return `优化稿包含${data.durations.length}镜，当前为${durations.length}镜，请先调整镜头数量。`;
         if(value("时长模式","手动设置")==="AI自动分配"){
             const total=data.durations.reduce((sum,seconds)=>sum+Number(seconds),0);if(!Number.isFinite(total)||Math.abs(total-Number(value("目标总秒数",30)))>0.01)return "优化稿总时长与当前设置不一致，请调整总时长。";
         }else if(data.durations.some((seconds,index)=>!Number.isFinite(Number(seconds))||Math.abs(Number(seconds)-durations[index])>0.01))return "优化稿每镜时长与当前设置不一致，请调整每镜时长。";
+        if(isTextVideo())return (data.references?.length||data.reference_files?.length)?'文生视频优化稿不应包含图片参考。':'';
         const exported=(data.references||[]).map(item=>typeof item==="string"?item:item?.id).filter(Boolean),current=references.map(item=>item.id);
         if(JSON.stringify(exported)!==JSON.stringify(current))return `优化稿需要${exported.join("、")||"相应参考图"}，请先添加并对应参考图片。`;
         return "";
@@ -1546,7 +1599,7 @@ function setupStudio(node,nodeData) {
         actionState.textContent=error||"已导入完整优化稿，下次运行直接使用现有分镜计划。";renderPreview();optimizedScript.focus();
     }
     function planHasEdits(){return Object.keys(planEditData()).length>0||Object.keys(readOverrides()).length>0||selectedImageIds().size>0;}
-    function planCanResume(){const available=snapshot?.plan_available??!!(snapshot?.optimized_script&&snapshot?.scenes?.some(scene=>scene.prompt||scene.video_prompt));return !!value("保留分镜计划",false)&&!!snapshot?.run_id&&available&&!draftChanged;}
+    function planCanResume(){const available=snapshot?.plan_available??!!(snapshot?.optimized_script&&snapshot?.scenes?.some(scene=>scene.prompt||scene.video_prompt)),text=snapshot?.mode==='文生视频'||snapshot?.input_mode==='T2VA'||snapshot?.video_input==='文生视频';return text===isTextVideo()&&!!value("保留分镜计划",false)&&!!snapshot?.run_id&&available&&!draftChanged;}
     function imagePromptCanEdit(){return !!snapshot?.run_id&&!!value('保留分镜计划',false)&&(snapshot.plan_available??!!snapshot.scenes?.some(scene=>scene.prompt||scene.video_prompt))&&!draftChanged;}
     function toggleImageChoice(identity){
         if(modeSelect.value!=="AI生成分镜"||value("生图重做范围")!=="选择重生"||!planHasEdits()||["running","generating"].includes(snapshot?.status))return;
@@ -1583,6 +1636,7 @@ function setupStudio(node,nodeData) {
         }
     }
     function renderMode() {
+        renderVideoInput();
         root.dataset.manualMode=String(isManualMode());
         if(isManualMode()){write("保留分镜计划",true);if(manualModeSignature!==`${node.id}:true`){previewMode="all";node.properties||={};node.properties.h3_director_preview_mode="all";}}
         renderManualControls();notifyManualMode();
@@ -1593,7 +1647,7 @@ function setupStudio(node,nodeData) {
     }
     function renderAspectSettings(){
         const aspect=value("画幅","跟随图片"),busy=["running","generating"].includes(snapshot?.status);
-        const reference=aspectReference();
+        const reference=isTextVideo()?null:aspectReference();
         for(const[name,button]of aspectButtons){button.setAttribute("aria-pressed",String(name===aspect));button.disabled=busy&&name!=="跟随图片";if(name==="跟随图片"){button.textContent=`跟随${reference?.id||"图片"}${references.length>1?" ▾":""}`;button.title=references.length>1?"选择用于确定输出尺寸的参考图；不改变人物、环境与主参考图。":"按唯一参考图确定输出尺寸。";}}
         for(const name of["自定义宽度","自定义高度"]){const field=configFields.get(name);if(field)field.hidden=aspect!=="自定义";}
         const canvas=snapshot?.canvas;const width=canvas?.width??canvas?.["宽度"],height=canvas?.height??canvas?.["高度"];
@@ -1605,6 +1659,7 @@ function setupStudio(node,nodeData) {
     }
     function refreshModelConnections(invalidate=true){
         if(disposed)return;
+        textVideoWeights();
         notifyManualMode();
         colorH3Connections(app,node);
         const sourceData={};
@@ -1629,10 +1684,10 @@ function setupStudio(node,nodeData) {
             let model=kind==="text"?(settings["模型"]??settings.model??effective.model??value("语言模型","")):kind==="image"?(settings["图像模型"]??settings.model??effective.model):((settings["启用加速LoRA"]&&settings["加速权重"]==="原作者融合模型")?settings["原作者模型"]:(settings["基础模型"]??effective["基础模型"]));
             if(kind==="video"&&!source)model=value("启用加速LoRA")&&value("加速权重")==="原作者融合模型"?value("原作者模型"):value("基础模型");
             if(kind==="rules")model=source?"六类提示词规则":"默认提示词规则";
-            connectionLines.get(kind).textContent=`${source?"已连接":"工作台"} · ${model||"默认模型"}`;
+            connectionLines.get(kind).textContent=`${source?"已连接":"工作台"} · ${model||"默认模型"}${kind==='video'&&isTextVideo()?` · 文生 · ${value('启用加速LoRA')?'独立LoRA':'基础模型'}`:''}`;
             connectionLines.get(kind).title=String(model||"");
         }
-        refreshImageSampling(sourceData.image?.source);renderImageSizing();referenceUpscale.render();renderImageSeed();renderSeed();
+        if(!isTextVideo()){refreshImageSampling(sourceData.image?.source);renderImageSizing();referenceUpscale.render();}renderImageSeed();renderSeed();renderVideoInput();
     }
     function insertReference(reference) {
         const from = atRange?.[0] ?? textarea.selectionStart ?? textarea.value.length;
@@ -1668,6 +1723,7 @@ function setupStudio(node,nodeData) {
         textarea.refreshReferences();
     }
     function updatePicker() {
+        if(isTextVideo()){picker.hidden=true;atRange=null;return;}
         const position = textarea.selectionStart;
         const prefix = textarea.value.slice(0, position);
         const found = prefix.match(/@([^\s@，。；！？、]*)$/);
@@ -1711,6 +1767,7 @@ function setupStudio(node,nodeData) {
     textarea.addEventListener("blur", () => {setTimeout(() => {if (!disposed&&!picker.contains(document.activeElement)) picker.hidden = true;}, 120);});
 
     async function uploadFiles(files) {
+        if(isTextVideo())return [];
         if (uploading || disposed || ["running","generating"].includes(snapshot?.status)) return [];
         const images = Array.from(files).filter(file => file.type.startsWith("image/") || /\.(png|jpe?g|webp|bmp|gif|avif)$/i.test(file.name));
         const remaining = MAX_REFERENCES - references.length;
@@ -1839,14 +1896,14 @@ function setupStudio(node,nodeData) {
         const scene = sceneAt(selected);
         let imageItem = imageEditingMode()?storyboardImage(selected):scene?.image;
         let endImageItem = imageEditingMode()?storyboardImage(selected+1):scene?.end_image;
-        if (!imageItem && modeSelect.value === "逐镜参考图" && references[selected]) {
+        if (!isTextVideo()&&!imageItem && modeSelect.value === "逐镜参考图" && references[selected]) {
             const parts = references[selected].filename.replaceAll("\\", "/").split("/");
             imageItem = {filename:parts.pop(), subfolder:parts.join("/"), type:"input"};
-        } else if (!imageItem && !selected && references[0]&&!imageEditingMode()) {
+        } else if (!isTextVideo()&&!imageItem && !selected && references[0]&&!imageEditingMode()) {
             const parts = references[0].filename.replaceAll("\\", "/").split("/");
             imageItem = {filename:parts.pop(), subfolder:parts.join("/"), type:"input"};
         }
-        const constrained = !["上一镜末帧","末帧高清续接"].includes(modeSelect.value) && value("镜头衔接","首尾帧约束") === "首尾帧约束";
+        const constrained = !isTextVideo()&&!["上一镜末帧","末帧高清续接"].includes(modeSelect.value) && value("镜头衔接","首尾帧约束") === "首尾帧约束";
         if (!endImageItem && constrained && modeSelect.value === "逐镜参考图" && references[selected+1]) {
             const parts = references[selected+1].filename.replaceAll("\\", "/").split("/");
             endImageItem = {filename:parts.pop(),subfolder:parts.join("/"),type:"input"};
@@ -1854,6 +1911,7 @@ function setupStudio(node,nodeData) {
         const imageURL = mediaURL(imageItem); setMedia(image,imageURL); imagePlaceholder.hidden = !!imageURL;
         const endImageURL = mediaURL(endImageItem); setMedia(endImage,endImageURL); endImagePlaceholder.hidden = !!endImageURL;
         endFrameBox.hidden = !constrained && !endImageURL;
+        imageBox.hidden=isTextVideo();referenceBindingLabel.hidden=isTextVideo();imagePromptEditor.hidden=isTextVideo();imagePromptEditor.previousElementSibling.hidden=isTextVideo();
         firstFrameBox.style.width = endFrameBox.hidden ? "100%" : "50%";
         const bindings = Array.from(String(scene?.display_prompt || "").matchAll(/@(?:(?:分镜|首帧|图)\d+|结束帧)/g),match=>match[0]);
         const firstBinding = bindings[0] || (["AI生成分镜","手动分镜图"].includes(modeSelect.value) ? `@分镜${selected+1}` : modeSelect.value === "逐镜参考图" ? `@${references[selected]?.id || `图${selected+1}`}` : "");
@@ -1906,7 +1964,7 @@ function setupStudio(node,nodeData) {
         renderImageJobs();
         renderManualControls();
         renderAspectSettings();
-        renderImageSizing();referenceUpscale.render();
+        if(!isTextVideo()){renderImageSizing();referenceUpscale.render();}renderVideoInput();
         renderAllScenes();
         renderTimings();
         const directory=String(snapshot?.output_directory||"");if(directory!==knownOutputPath){showOutputPath(directory);copyOutput.textContent="复制路径";}
@@ -2028,11 +2086,11 @@ function setupStudio(node,nodeData) {
             renderSceneTimings(index,view);
             const manual=isManualMode(),manualImage=storyboardImage(index);let first=imageEditingMode()?manualImage:scene?.image;
             const reference=index=>{const ref=references[index];if(!ref)return null;const parts=ref.filename.replaceAll("\\","/").split("/");return{filename:parts.pop(),subfolder:parts.join("/"),type:"input"};};
-            if(!first&&!manual&&!aiImageEditingMode()&&(modeSelect.value==="逐镜参考图"||!index))first=reference(modeSelect.value==="逐镜参考图"?index:0);
+            if(!isTextVideo()&&!first&&!manual&&!aiImageEditingMode()&&(modeSelect.value==="逐镜参考图"||!index))first=reference(modeSelect.value==="逐镜参考图"?index:0);
             const imageURL=mediaURL(first),url=mediaURL(scene?.video);setMedia(view.picture,imageURL);
             if(activeAllScene===index&&allSceneVideo.dataset.h3src!==url)releaseAllScenePlayer();
             const playing=activeAllScene===index&&!!url;
-            view.picture.hidden=playing||!imageURL;view.waiting.hidden=playing||!!imageURL;view.waiting.textContent=url?"视频已完成":"等待分镜图";view.play.hidden=!url;
+            view.picture.hidden=playing||!imageURL;view.waiting.hidden=playing||!!imageURL;view.waiting.textContent=url?"视频已完成":isTextVideo()?'等待视频生成':"等待分镜图";view.play.hidden=!url;
             if(playing)updateAllScenePlayback();else{view.play.textContent="▶";view.play.dataset.playing="false";view.play.setAttribute("aria-label",`播放镜头${index+1}视频`);view.play.title="播放视频";}
             const busy=["running","generating","生成中","准备图片","修复末帧"].includes(scene?.status)&&!url;
             view.overlay.hidden=!busy;view.overlayText.textContent=status;
@@ -2199,6 +2257,18 @@ function setupStudio(node,nodeData) {
     imagePromptEditor.addEventListener("input",savePromptEdits);
     async function queueSaved(redo) {
         if (!snapshot?.run_id || disposed || queueing||draftChanged) return;
+        const originalOverrides=String(value('分镜覆盖','{}'));let changedSceneSeed=false;
+        if(redo&&currentH3Seed(node)!==null){
+            // Materialize an inherited base before queue preparation so rerolling
+            // one shot never rerolls the global seed or invalidates other videos.
+            setH3Seed(node,currentH3Seed(node));
+            if(seedMode(node)==='random'){
+                const overrides=readOverrides(),key=String(selected+1),scene=sceneAt(selected);
+                const previous=overrides[key]?.video_seed??scene?.video_seed??((currentH3Seed(node)+selected)>>>0);
+                overrides[key]={...(overrides[key]||{}),video_seed:randomH3SceneSeed(previous)};
+                write('分镜覆盖',JSON.stringify(overrides));changedSceneSeed=true;
+            }
+        }
         queueing = true; renderPreview(); actionState.textContent = redo ? `正在提交镜头${selected+1}…` : "正在提交继续生成…";
         write("继续任务",snapshot.run_id);
         write("重做镜头",redo ? selected+1 : 0);
@@ -2207,7 +2277,7 @@ function setupStudio(node,nodeData) {
             const result = await app.queuePrompt(0,1);
             if (result === false) throw new Error("提交失败，请查看队列错误。");
             if (!disposed) actionState.textContent = "已提交";
-        } catch (error) {if (!disposed) actionState.textContent = error.message || "提交失败。";}
+        } catch (error) {if(changedSceneSeed)write('分镜覆盖',originalOverrides);if (!disposed) actionState.textContent = error.message || "提交失败。";}
         finally {
             write("继续任务",planCanResume()?snapshot.run_id:""); write("重做镜头",0);
             queueing = false; if (!disposed) renderPreview();
@@ -2219,7 +2289,8 @@ function setupStudio(node,nodeData) {
         if (disposed || !data || typeof data !== "object") return;
         if (data.node_id != null && String(data.node_id) !== String(node.id)) return;
         if(!persisted&&!data.run_id)return;
-        if(data.mode&&data.mode!==value("生成模式",MODES[1]))return;
+        const textInput=data.mode==='文生视频'||data.input_mode==='T2VA'||data.video_input==='文生视频';if(textInput!==isTextVideo())return;
+        if(!isTextVideo()&&data.mode&&data.mode!==value("生成模式",MODES[1]))return;
         if((data.prompt_format??data.plan_export?.prompt_format??PROMPT_FORMATS[0])!==value("提示词格式",PROMPT_FORMATS[0]))return;
         if(!persisted&&data.prompt_id&&activePromptId&&data.prompt_id!==activePromptId&&!submissionArmed)return;
         const identity=updateIdentity(snapshot,data,submissionArmed);if(identity.obsolete)return;
@@ -2274,11 +2345,11 @@ function setupStudio(node,nodeData) {
             references = Array.isArray(raw) ? raw.filter(item => item?.id && item?.filename).slice(0,MAX_REFERENCES) : [];
         } catch {references = [];}
         referenceBindings=node.properties.h3_reference_bindings||referenceBindings;
-        const reconciled=reconcileH3References(references,String(value("剧本","")),referenceBindings);
+        const reconciled=isTextVideo()?{references,script:String(value('剧本','')),bindings:referenceBindings}:reconcileH3References(references,String(value("剧本","")),referenceBindings);
         references=reconciled.references;referenceBindings=reconciled.bindings;node.properties.h3_reference_bindings=referenceBindings;node.properties.h3_ref_serial=references.length;
-        write("参考图集",JSON.stringify(references));write("剧本",reconciled.script);
+        if(!isTextVideo())write("参考图集",JSON.stringify(references));write("剧本",reconciled.script);
         textarea.value = reconciled.script;
-        if(h3ReferenceTokens(reconciled.script,referenceBindings,references).some(item=>item.missing)){textarea.setAttribute("aria-invalid","true");uploadState.textContent="有未引用的图片，请点击红色引用重新选择，或删除该引用。";uploadState.classList.add("h3-reference-error");uploadState.dataset.referenceError="true";}
+        if(!isTextVideo()&&h3ReferenceTokens(reconciled.script,referenceBindings,references).some(item=>item.missing)){textarea.setAttribute("aria-invalid","true");uploadState.textContent="有未引用的图片，请点击红色引用重新选择，或删除该引用。";uploadState.classList.add("h3-reference-error");uploadState.dataset.referenceError="true";}
         modeSelect.value = MODES.includes(value("生成模式")) ? value("生成模式") : MODES[1];
         const imported=importedPlanData();if(imported&&!snapshot?.run_id&&typeof node.properties.h3_optimized_import_text!=="string"&&typeof imported.optimized_script==="string")node.properties.h3_optimized_import_text=imported.optimized_script;
         const count = Math.min(MAX_SCENES,Math.max(1,Number(value("分镜数量",3)) || 3));
@@ -2292,7 +2363,7 @@ function setupStudio(node,nodeData) {
             else control.value = String(value(name,""));
             updateControlTitle(control);
         }
-        renderReferences(); renderMentions(); renderMode(); renderDurations(); renderPreview();refreshModelConnections(false);
+        if(!isTextVideo())renderReferences(); renderMentions(); renderMode(); renderDurations(); renderPreview();refreshModelConnections(false);
     }
     releaseButton.onclick = async () => {
         releaseButton.disabled = true; releaseState.textContent = "正在释放…";
@@ -2313,7 +2384,7 @@ function setupStudio(node,nodeData) {
         if (!widget) continue;
         const callback = widget.callback;
         widget.callback = function () {const result = callback?.apply(this,arguments); if (!syncing) syncFromWidgets(); return result;};
-        if (privateFields.has(name)||name==='视频种子'||name==='随机种子') continue;
+        if (privateFields.has(name)||name==='视频种子'||name==='随机种子'||name==='视频输入') continue;
         const field = el("label", "h3-field"); field.append(el("span", "", ({"生成档位":"档位","镜头衔接":"衔接","启用加速LoRA":"加速","加速权重":"权重","加速步数":"步数","执行范围":"范围","自定义宽度":"宽度","自定义高度":"高度","文本编码器":"文本编码","原作者模型":"融合模型","视频采样器":"采样器","视频调度器":"调度器","稀疏注意力":"稀疏注意","随机种子":"分镜生图种子"})[name]||name));field.title=name;
         const declaration = nodeData?.input?.required?.[name] || nodeData?.input?.optional?.[name];
         const fieldOptions = declaration?.[1] || widget.options || {};

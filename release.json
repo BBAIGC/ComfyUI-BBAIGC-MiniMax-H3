@@ -1,11 +1,11 @@
 {
   "id": "h3",
-  "version": "1.2.11",
+  "version": "1.2.12",
   "author": "BBAIGC",
-  "workflow": "workflows/BBAIGC_h3_V1.2.11.json",
-  "sha256": "0a7e44082a139521c126d7776acff069de0cefb6ac46ed33027d0bcf0715fe87",
+  "workflow": "workflows/BBAIGC_h3_V1.2.12.json",
+  "sha256": "69148fdd4e3b1592e0d439aeee2596cc41ffae680efe855b8ae55cc1c2a6ba3a",
   "node_versions": {
-    "core": "1.2.11"
+    "core": "1.2.12"
   },
-  "notes": "恢复完整工作台面板，分镜原图默认长边2K；补齐图像采样控件与独立的视频/分镜固定与随机种子（默认随机）；分镜图和视频保存真实执行工作流，修正作者标签遮挡。"
+  "notes": "新增图生/文生视频滑动切换；字幕按识别时间分成约10字短句，修正空档挂住首条；随机重做仅更换本镜视频种子。"
 }

@@ -20,12 +20,16 @@ def validate_lines(lines,duration):
     if not isinstance(lines,list) or len(lines)>1000:raise ValueError('字幕应为最多1000条的列表。')
     clean=[]
     for row in lines:
+        if not isinstance(row,dict):raise ValueError('每条字幕应包含开始、结束和文字。')
         start,end=row.get('start'),row.get('end');text=row.get('text')
         if any(type(v) not in (int,float) or not math.isfinite(v) for v in (start,end)) or not 0<=start<end<=duration+0.05:
             raise ValueError('字幕起止时间超出视频，或结束早于开始。')
         if not isinstance(text,str) or not text.strip() or len(text)>500:raise ValueError('每条字幕应为1～500字。')
         clean.append({'start':float(start),'end':float(end),'text':text.strip()})
-    return sorted(clean,key=lambda row:row['start'])
+    clean.sort(key=lambda row:row['start'])
+    if any(row['start']<previous['end']-1e-6 for previous,row in zip(clean,clean[1:])):
+        raise ValueError('字幕时间存在重叠，请调整上一条结束或下一条开始；不会自动改写编辑时间。')
+    return clean
 
 
 def srt_text(lines):
@@ -71,6 +75,7 @@ def _source(record):
 
 def _recognize(path,progress,language='自动'):
     import av
+    from .subtitle_timing import caption_lines
     model_dir=Path(folder_paths.models_dir)/'whisper'/'base'
     if not (model_dir/'model.safetensors').is_file():raise RuntimeError('本地语音识别模型未就绪：models/whisper/base。')
     progress('recognizing','正在识别声音与时间点')
@@ -84,25 +89,36 @@ def _recognize(path,progress,language='自动'):
             if not video.streams.audio:return []
             total_seconds=float(video.duration/av.time_base) if video.duration else None
             resampler=av.AudioResampler(format='fltp',layout='mono',rate=16000)
-            chunks=[];count=0;offset=0.;result=[]
+            chunks=[];count=0;offset=None;result=[]
+            media_start=float(video.start_time/av.time_base) if video.start_time is not None else 0.0
             def transcribe(audio,at):
                 if not len(audio) or float(np.sqrt(np.mean(audio*audio)))<0.002:return
                 generation={'task':'transcribe'}
                 if language!='自动':generation['language']={'中文':'zh','英语':'en'}[language]
-                output=reader({'raw':audio,'sampling_rate':16000},return_timestamps=True,generate_kwargs=generation,chunk_length_s=30)
-                for item in output.get('chunks',[]):
-                    a,b=item['timestamp']
-                    a=0.0 if a is None else float(a);b=len(audio)/16000 if b is None else float(b)
-                    if b>a and item.get('text','').strip():result.append({'start':at+a,'end':at+b,'text':item['text'].strip()})
+                output=reader({'raw':audio,'sampling_rate':16000},return_timestamps='word',generate_kwargs=generation,chunk_length_s=30)
+                result.extend(caption_lines(output.get('chunks',[]),len(audio)/16000,offset=at,source='word'))
                 done=at+len(audio)/16000
                 progress('recognizing',f'已识别 {min(done,total_seconds):.1f} / {total_seconds:.1f} 秒' if total_seconds else f'已识别 {done:.1f} 秒')
+            def consume(sample):
+                nonlocal chunks,count,offset
+                values=sample.to_ndarray().reshape(-1)
+                at=sample.time
+                at=float(at)-media_start if type(at) in (int,float) and math.isfinite(at) else (offset or 0.0)+count/16000
+                if at<0:
+                    skip=min(len(values),round(-at*16000));values=values[skip:];at+=skip/16000
+                if not len(values):return
+                at=max(0.0,at)
+                if count and abs(at-(offset+count/16000))>0.08:
+                    transcribe(np.concatenate(chunks),offset);chunks=[];count=0
+                if not count:offset=at
+                chunks.append(values);count+=len(values)
+                if count>=16000*30:
+                    transcribe(np.concatenate(chunks),offset);offset+=count/16000;chunks=[];count=0
             for frame in video.decode(audio=0):
                 from comfy import model_management as mm
                 mm.throw_exception_if_processing_interrupted()
-                for sample in resampler.resample(frame):
-                    values=sample.to_ndarray().reshape(-1);chunks.append(values);count+=len(values)
-                if count>=16000*30:
-                    audio=np.concatenate(chunks);transcribe(audio,offset);offset+=len(audio)/16000;chunks=[];count=0
+                for sample in resampler.resample(frame):consume(sample)
+            for sample in resampler.resample(None):consume(sample)
             if chunks:transcribe(np.concatenate(chunks),offset)
         return result
     finally:reader=None;gc.collect()
@@ -146,14 +162,26 @@ class H3Subtitles:
             draft=json.loads(编辑字幕 or '{}')
             if not isinstance(draft,dict):raise ValueError('字幕编辑数据应为对象。')
             cache=source.with_suffix('.subtitles.json')
-            if draft.get('source_sha256')==sha and (draft.get('language','自动')==识别语言 or 执行步骤=='使用编辑字幕导出'):lines=validate_lines(draft.get('lines'),duration)
+            from .subtitle_timing import TIMING_VERSION,caption_lines
+            cached=json.loads(cache.read_text(encoding='utf-8')) if cache.is_file() else {}
+            cache_matches=cached.get('source_sha256')==sha and cached.get('language','自动')==识别语言
+            draft_matches=draft.get('source_sha256')==sha and (draft.get('language','自动')==识别语言 or 执行步骤=='使用编辑字幕导出')
+            # Explicit edits keep their exact seconds. Unedited old segment
+            # caches are recognized once with word timing; style-only changes
+            # reuse the corrected cache and do not reload the recognizer.
+            draft_edited=draft_matches and (执行步骤=='使用编辑字幕导出' or not cache_matches or draft.get('lines')!=cached.get('lines'))
+            timing_source=[]
+            if draft_edited or draft_matches and draft.get('timing_version')==TIMING_VERSION:
+                lines=validate_lines(draft.get('lines'),duration);timing_source=['edited'] if draft_edited else draft.get('timing_source',['word'])
             elif 执行步骤=='使用编辑字幕导出':raise ValueError('编辑字幕不属于当前视频，请先识别当前成片。')
-            elif cache.is_file() and json.loads(cache.read_text(encoding='utf-8')).get('source_sha256')==sha and json.loads(cache.read_text(encoding='utf-8')).get('language','自动')==识别语言:lines=validate_lines(json.loads(cache.read_text(encoding='utf-8'))['lines'],duration)
+            elif cache_matches and cached.get('timing_version')==TIMING_VERSION:
+                lines=validate_lines(cached['lines'],duration);timing_source=cached.get('timing_source',['word'])
             else:
-                recognized=_recognize(source,progress,识别语言)
-                recognized=[{**row,'end':min(row['end'],duration)} for row in recognized if row['start']<duration]
+                recognized=caption_lines(_recognize(source,progress,识别语言),duration,source='word')
+                timing_source=list(dict.fromkeys(row.get('timing_source','word') for row in recognized))
                 lines=validate_lines(recognized,duration)
-            payload={'source_sha256':sha,'run_id':manifest['run_id'],'lines':lines,'width':w,'height':h,'duration':duration,'language':识别语言}
+            payload={'source_sha256':sha,'run_id':manifest['run_id'],'lines':lines,'width':w,'height':h,'duration':duration,'language':识别语言,
+                     'timing_version':TIMING_VERSION,'timing_source':timing_source}
             cache.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf-8')
             srt=source.with_suffix('.srt');srt.write_text(srt_text(lines),encoding='utf-8-sig')
             ass=source.with_suffix('.ass');ass.write_text(ass_text(lines,w,h,字体,字号,颜色,黑色描边,横向位置,纵向位置),encoding='utf-8-sig')

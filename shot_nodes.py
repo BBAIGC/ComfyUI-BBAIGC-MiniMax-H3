@@ -134,8 +134,10 @@ class H3VideoModelBundle:
              video_vae_name=VIDEO_VAE, audio_vae_name=AUDIO_VAE,
              turbo_enabled=True, turbo_lora=TURBO_LORA, low_vram=True,
              sparse_attention=False, accelerated_steps=8,
-             turbo_lora_4step=TURBO_LORA_4STEP):
+             turbo_lora_4step=TURBO_LORA_4STEP, input_mode="I2V"):
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3SigmaShift
+        if input_mode not in ("I2V", "T2VA"):
+            raise ValueError("视频输入模式应为图生视频或文生视频。")
         if not isinstance(ready_plan, str) or not ready_plan.strip():
             raise ValueError("请先连接提示词优化器输出的完整计划。")
         try:
@@ -171,7 +173,12 @@ class H3VideoModelBundle:
             model = _execute_v3("H3SLAAttention", model=model, sparsity_ratio=0.90,
                                 block_size="64", min_seq_len=8192,
                                 dense_last_steps=0, protect_audio=True, enabled=True)[0]
-        model = _outputs(MiniMaxH3SigmaShift.execute(model, 12.0, 3.0))[0]
+        # The 768p four-step LoRA was distilled with 6/3 shifts. Apply that
+        # documented schedule to the new text-only route; existing I2V keeps
+        # its saved 12/3 behavior.
+        video_shift = 6.0 if (input_mode == "T2VA" and turbo_enabled and turbo_steps == 4 and
+                              "768p" in str(actual_lora).lower()) else 12.0
+        model = _outputs(MiniMaxH3SigmaShift.execute(model, video_shift, 3.0))[0]
         clip = nodes.CLIPLoader().load_clip(clip_name, "minimax", "default")[0]
         vae = nodes.VAELoader().load_vae(video_vae_name)[0]
         audio_vae = nodes.VAELoader().load_vae(audio_vae_name)[0]
@@ -179,7 +186,8 @@ class H3VideoModelBundle:
                  "ready_plan": ready_plan, "turbo_enabled": bool(turbo_enabled),
                  "turbo_steps": turbo_steps, "turbo_lora": actual_lora,
                  "cfg": 1.0,
-                 "sparse_attention": use_sparse, "model_name": unet_name},)
+                 "sparse_attention": use_sparse, "model_name": unet_name,
+                 "input_mode": input_mode, "sigma_shift_video": video_shift, "sigma_shift_audio": 3.0},)
 
 
 class H3SamplingSteps:
@@ -257,6 +265,12 @@ class H3GenerateShot:
                   steps=4, seed=42, audio_mode="模型音频", continue_previous=True,
                   first_frame=None, previous_video=None, previous_last_frame=None, last_frame=None,
                   sampler_name="res_multistep", scheduler="simple"):
+        input_mode = bundle.get("input_mode", "I2V")
+        if input_mode not in ("I2V", "T2VA"):
+            raise ValueError("视频输入模式无效，请重新选择图生视频或文生视频。")
+        if input_mode == "T2VA" and any(value is not None for value in
+                                        (first_frame, last_frame, previous_video, previous_last_frame)):
+            raise ValueError("文生视频不能接入首帧、尾帧或上一镜视频，请关闭图像约束后重试。")
         import comfy.model_management as mm
         from comfy_api.latest import InputImpl, Types
         from comfy_extras.nodes_audio import VAEDecodeAudio
@@ -380,6 +394,7 @@ class H3GenerateShot:
                 temporary_path = None
                 video = InputImpl.VideoFromFile(str(destination))
             report = json.dumps({
+                "seed": int(seed),
                 "seconds": actual_seconds, "output_frames": target_frames,
                 "generated_frames": generated_frames, "fps": FPS,
                 "steps": effective_steps, "cfg": bundle["cfg"],
@@ -387,6 +402,9 @@ class H3GenerateShot:
                 "turbo_enabled": bundle["turbo_enabled"],
                 "turbo_steps": bundle.get("turbo_steps"),
                 "turbo_lora": bundle.get("turbo_lora"),
+                "input_mode": input_mode,
+                "sigma_shift_video": bundle.get("sigma_shift_video", 12.0),
+                "sigma_shift_audio": bundle.get("sigma_shift_audio", 3.0),
                 "audio_mode": "对白音轨" if using_dialogue else "静音" if silent else "模型音频",
                 "dialogue_offset_seconds": bundle.get("_dialogue_offset_seconds", 0.0) if using_dialogue else None,
                 "dialogue_source_seconds": dialogue_track.get("seconds") if using_dialogue else None,

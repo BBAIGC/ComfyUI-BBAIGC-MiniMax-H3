@@ -80,6 +80,12 @@ function distinctSeed(seed, randomUint32) {
     return next === null || next === seed ? (seed + 1) >>> 0 : next;
 }
 
+export function randomH3SceneSeed(seed, randomUint32) {
+    const previous = uint32(seed);
+    if (previous === null) throw new RangeError('单镜视频种子无效。');
+    return distinctSeed(previous, randomUint32);
+}
+
 export function prepareH3ImageSeed(node, {resumeRun = '', hasSnapshot = false, randomUint32} = {}) {
     const mode = imageSeedMode(node);
     const resumeWidget = node?.widgets?.find(widget => widget?.name === '继续任务');

@@ -31,6 +31,20 @@ from .motion_continuity import is_continuous_take, apply_motion_continuity
 log = logging.getLogger(__name__)
 PREFERRED_MODEL = "uncensored-qwen3.5:9b-aggressive"
 VOICE_MODES = ("自动识别原稿", "仅指定对白", "无对白（环境音）", "静音")
+
+
+def normalize_input_mode(value="I2V"):
+    mode = str(value).upper()
+    if mode in ("I2V", "I2VA"):
+        return "I2V"
+    if mode in ("T2V", "T2VA"):
+        return "T2VA"
+    raise ValueError("视频输入类型应为图生视频或文生视频。")
+
+
+def validate_text_only_references(text, references=()):
+    if references or re.search(r"@(?:图[1-9]\d*|分镜[1-9]\d*|首帧[1-9]\d*|结束帧)(?!\d)|(?:素材|参考)图[1-9]\d*(?!\d)|\bPicture\s+[1-9]\d*\b", str(text), re.I):
+        raise ValueError("文生视频不使用参考图片，请移除图片绑定或切换到图生视频。")
 DEMO_SCRIPT = (
     "参考图中是一位明确25岁的成年人物，场景为安静的室内。固定机位，保持人物、衣服和光照一致。"
     "先让人物自然看向镜头，微笑说：‘下午好。’随后拿起面前的杯子，轻轻转动杯子。"
@@ -616,7 +630,11 @@ def _repair_dialogue_assignments(client, model_name, raw, dialogues, seconds, sc
 
 def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
                        timeline_offset=0.0, scene_start_offsets=None,
-                       scene_index_offset=0, total_scene_count=None):
+                       scene_index_offset=0, total_scene_count=None, input_mode="I2V"):
+    input_mode = normalize_input_mode(input_mode)
+    text_only = input_mode == "T2VA"
+    if text_only:
+        validate_text_only_references(script)
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
@@ -644,6 +662,11 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
     for index, source in enumerate(raw["scenes"]):
         if not isinstance(source, dict):
             raise ValueError("镜头规划必须是对象。")
+        if text_only:
+            validate_text_only_references("\n".join(str(source.get(name, "")) for name in
+                                          ("visual", "action", "start_state", "end_state", "image_prompt")),
+                                          source.get("reference_ids", []) or source.get("reference_roles", {}))
+            source["reference_ids"] = []
         env_anchor = normalize_environment_anchor(source.get("environment_anchor", raw.get("environment_anchor")))
         end_environment = normalize_environment_anchor(source.get("end_environment_anchor", env_anchor))
         has_environment = "environment_anchor" in source or "environment_anchor" in raw
@@ -655,6 +678,10 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
         permitted_words = [expected[entry["id"]]["text"] for entry in assigned
                            if isinstance(entry, dict) and entry.get("id") in expected]
         for name in ("visual", "action", "soundscape", "music", "start_state", "end_state", "image_prompt"):
+            if text_only and name == "image_prompt":
+                if name in source:
+                    source[name] = ""
+                continue
             if name not in source and name in ("start_state", "end_state", "image_prompt"):
                 continue
             source[name] = _sanitize_description_speech(
@@ -760,7 +787,7 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
         fields = apply_motion_continuity(fields, script, scene_index_offset + index, total_scene_count)
         encoded = json.dumps(fields, ensure_ascii=False, indent=2)
         compiled.append({"fields": fields, "json": encoded,
-                         "prompt": render_h3_prompt(encoded, input_mode="I2V", duration_seconds=seconds[index])})
+                         "prompt": render_h3_prompt(encoded, input_mode=input_mode, duration_seconds=seconds[index])})
         normalized.append({**source, "seconds": seconds[index]})
     if Counter(observed) != Counter(expected.keys()):
         raise ValueError("大模型漏掉、重复或关闭了原稿中的指定对白，已停止生成；可用“指定对白覆盖”纠正识别结果。")
@@ -1074,12 +1101,14 @@ def _dialogue_pacing_summary(scenes, seconds, outline_receipt=None):
 
 def plan_sequence(script, durations, model_name, voice_mode, seed=42,
                   references=None, dialogue_override="", model_settings=None,
-                  duration_mode="手动设置", target_total_seconds=None, prompt_rules=None, progress=None):
+                  duration_mode="手动设置", target_total_seconds=None, prompt_rules=None, progress=None, *, input_mode="I2V"):
     """Plan 1–100 independent clips while holding only a bounded LLM batch.
 
     Reference paths are validated by the caller. The returned ready token is
     issued only after the private language model's unload is confirmed.
     """
+    input_mode = normalize_input_mode(input_mode)
+    text_only = input_mode == "T2VA"
     script = str(script).strip()
     if not script or len(script) > 12000:
         raise ValueError("请填写1～12000字的完整剧本。")
@@ -1101,6 +1130,8 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
     if model_settings and model_settings.get("model"):
         model_name = model_settings["model"]
     references = list(references or [])
+    if text_only:
+        validate_text_only_references(script, references)
     if len(references) > 101:
         raise ValueError("参考图库最多101张；每次视觉规划最多读取3张缩略图。")
     catalog = [{"id": item["id"], "filename": item.get("filename", "")} for item in references]
@@ -1161,6 +1192,8 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
                         script, len(batch_seconds), batch_seconds, batch_dialogues, voice_mode,
                         timeline_offset=sum(seconds[:offset]), prompt_rules=prompt_rules)
                     system += "\n本次只细化指定的全局镜头槽，不要再次分配整篇剧情。上一镜结束状态是本镜不可倒退的起点。\n"
+                    if text_only:
+                        system += "\n本任务为纯文生视频，没有参考图片；reference_ids必须为[]，reference_roles必须为{}，不要虚构图片或Picture编号。\n"
                     payload = json.loads(request_text)
                     payload.update(global_scene_count=len(seconds), first_scene_number=offset + 1,
                                    reference_catalog=catalog, outline_slots=slots,
@@ -1204,6 +1237,10 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
                     for index, scene in enumerate(raw["scenes"]):
                         if not isinstance(scene, dict):
                             raise ValueError("分镜内容必须是对象。")
+                        if text_only:
+                            validate_text_only_references("\n".join(str(scene.get(key, "")) for key in
+                                                          ("visual", "action", "start_state", "end_state", "image_prompt")),
+                                                          scene.get("reference_ids", []) or scene.get("reference_roles", {}))
                         scene["environment_anchor"] = copy.deepcopy(previous_environment)
                         if slots:
                             scene["silence_reason"] = slots[index].get("silence_reason", "")
@@ -1211,7 +1248,8 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
                             previous_environment, scene.get("environment_change"), script)
                         _text(scene, "start_state")
                         _text(scene, "end_state")
-                        _text(scene, "image_prompt")
+                        if not text_only:
+                            _text(scene, "image_prompt")
                         composition = static_composition(_text(scene, "visual"), scene.get("composition", ""))
                         for key in ("visual", "action", "start_state", "end_state", "soundscape", "music"):
                             if isinstance(scene.get(key), str):
@@ -1279,7 +1317,7 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
                         # description: that would put contradictory instructions
                         # in the same image prompt. Rebuild from the normalized
                         # boundary state only, without this clip's action prose.
-                        scene["image_prompt"] = _boundary_image_prompt(
+                        scene["image_prompt"] = "" if text_only else _boundary_image_prompt(
                             scene["start_state"], _text(raw, "continuity", allow_empty=True),
                             facts=start_facts, inherited=bool(previous_state), environment_anchor=scene["environment_anchor"],
                             composition=composition, reference_roles=scene["reference_roles"])
@@ -1295,7 +1333,7 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
                     result = compile_storyboard(raw, script=script, count=len(batch_seconds),
                                                 seconds=batch_seconds, dialogues=batch_dialogues, voice_mode=voice_mode,
                                                 timeline_offset=sum(seconds[:offset]),
-                                                scene_index_offset=offset, total_scene_count=len(seconds))
+                                                scene_index_offset=offset, total_scene_count=len(seconds), input_mode=input_mode)
                     scenes.extend(result["scenes"])
                     compiled.extend(result["compiled"])
             finally:
@@ -1308,13 +1346,18 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
     for index, scene in enumerate(scenes):
         scene["video_prompt"] = compiled[index]["prompt"]
         scene["index"] = index + 1
-        end_reference = f"分镜{index + 2}" if index + 1 < len(scenes) else "结束帧"
-        scene["boundary_refs"] = [f"分镜{index + 1}", end_reference]
-        scene["display_prompt"] = (
-            f"@分镜{index + 1} → @{end_reference}\n"
-            f"开场：{scene['start_state']}\n收尾：{scene['end_state']}\n"
-            f"本镜：{scene['visual']} {scene['action']}")
-    final_image_prompt = _boundary_image_prompt(scenes[-1]["end_state"], facts=scenes[-1].get("end_facts"), inherited=True,
+        if text_only:
+            scene.pop("boundary_refs", None)
+            scene["display_prompt"] = (f"开场：{scene['start_state']}\n收尾：{scene['end_state']}\n"
+                                       f"本镜：{scene['visual']} {scene['action']}")
+        else:
+            end_reference = f"分镜{index + 2}" if index + 1 < len(scenes) else "结束帧"
+            scene["boundary_refs"] = [f"分镜{index + 1}", end_reference]
+            scene["display_prompt"] = (
+                f"@分镜{index + 1} → @{end_reference}\n"
+                f"开场：{scene['start_state']}\n收尾：{scene['end_state']}\n"
+                f"本镜：{scene['visual']} {scene['action']}")
+    final_image_prompt = "" if text_only else _boundary_image_prompt(scenes[-1]["end_state"], facts=scenes[-1].get("end_facts"), inherited=True,
                                                environment_anchor=scenes[-1].get("end_environment_anchor"),
                                                composition=scenes[-1].get("composition", ""), reference_roles=scenes[-1].get("reference_roles"))
     return {"status": "ready", "llm_released": True,
@@ -1332,7 +1375,8 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
             "dialogue_whitelist": dialogues, "dialogues_detected_from_source": extracted,
             "scenes": scenes, "structured_scenes": scenes,
             "final_image_prompt": final_image_prompt,
-            "generated_reference_ids": [f"分镜{index + 1}" for index in range(len(scenes))] + ["结束帧"],
+            "generated_reference_ids": [] if text_only else [f"分镜{index + 1}" for index in range(len(scenes))] + ["结束帧"],
+            **({"input_mode": "T2VA"} if text_only else {}),
             "compiled_prompts": [item["json"] for item in compiled],
             "prompts": [item["prompt"] for item in compiled],
             "planning_seconds": round(time.monotonic() - started, 2)}

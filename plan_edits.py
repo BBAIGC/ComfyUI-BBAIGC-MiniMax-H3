@@ -212,12 +212,25 @@ def _speech_tail(body, has_dialogue):
     return body[match.start():] if match else ""
 
 
-def apply_plan_edits(plan, edits):
+def apply_plan_edits(plan, edits, *, input_mode=None):
     if not isinstance(plan, dict) or not isinstance(plan.get("scenes"), list):
         raise ValueError("已有分镜计划无效，请先完成一次规划。")
+    from .planner import normalize_input_mode, validate_text_only_references
+    plan_mode = normalize_input_mode(plan.get("input_mode", "I2V"))
+    input_mode = plan_mode if input_mode is None else normalize_input_mode(input_mode)
+    if input_mode != plan_mode:
+        raise ValueError("编辑计划的视频输入类型与当前选择不同。")
+    text_only = input_mode == "T2VA"
     result = copy.deepcopy(plan)
     count = len(result["scenes"])
+    if text_only and isinstance(edits, dict):
+        validate_text_only_references(edits.get("optimized_script", ""))
     edits = normalize_plan_edits(edits, count)
+    if text_only:
+        validate_text_only_references(result.get("raw_script", ""))
+        for values in edits.values():
+            validate_text_only_references("\n".join(value for value in values.values() if isinstance(value, str)),
+                                          values.get("reference_ids", []))
     if not edits:
         return result
     from .planner import _boundary_image_prompt, _state_facts, _stable_continuity, compile_storyboard
@@ -284,7 +297,7 @@ def apply_plan_edits(plan, edits):
                                           count=1, seconds=[result["scene_seconds"][index]],
                                           dialogues=[line for line in result.get("dialogue_whitelist", []) if line["id"] in line_ids],
                                           voice_mode=result.get("speech_mode", "自动识别原稿"),
-                                          scene_index_offset=index, total_scene_count=count)
+                                          scene_index_offset=index, total_scene_count=count, input_mode=input_mode)
             new_fields = compiled["compiled"][0]["fields"]
             # Ordinary visual edits preserve original sound and music exactly.
             fields[H3_FIELDS[0]] = new_fields[H3_FIELDS[0]]
@@ -322,26 +335,30 @@ def apply_plan_edits(plan, edits):
             fields[H3_FIELDS[0]] = lock_environment_prompt(fields[H3_FIELDS[0]], environment, end_environment)
             fields = apply_motion_continuity(fields, result.get("raw_script", ""), index, count)
             encoded = json.dumps(fields, ensure_ascii=False, indent=2)
-            prompt = render_h3_prompt(encoded, input_mode="I2V", duration_seconds=result["scene_seconds"][index])
+            prompt = render_h3_prompt(encoded, input_mode=input_mode, duration_seconds=result["scene_seconds"][index])
             result["compiled_prompts"][index] = encoded
             result["prompts"][index] = scene["video_prompt"] = prompt
-        if {"start_state", "visual"}.intersection(values) and "image_prompt" not in values:
+        if not text_only and {"start_state", "visual"}.intersection(values) and "image_prompt" not in values:
             composition = scene.get("composition") or static_composition(scene.get("visual", ""))
             scene["image_prompt"] = _boundary_image_prompt(
                 scene.get("start_state", ""),
                 anchors["continuity"], facts=scene.get("start_facts"), inherited=index > 0,
                 environment_anchor=environment, composition=composition,
                 reference_roles=scene.get("reference_roles"))
-        boundary = scene.get("boundary_refs", [f"分镜{index+1}", f"分镜{index+2}" if index+1<count else "结束帧"])
-        scene["display_prompt"] = (f"@{boundary[0]} → @{boundary[1]}\n开场：{scene.get('start_state', '')}"
-                                    f"\n收尾：{scene.get('end_state', '')}\n本镜：{scene.get('visual', '')} {scene.get('action', '')}")
-    if "end_state" in changed.get(count-1, {}):
+        if text_only:
+            scene["reference_ids"] = []
+            scene["display_prompt"] = f"开场：{scene.get('start_state', '')}\n收尾：{scene.get('end_state', '')}\n本镜：{scene.get('visual', '')} {scene.get('action', '')}"
+        else:
+            boundary = scene.get("boundary_refs", [f"分镜{index+1}", f"分镜{index+2}" if index+1<count else "结束帧"])
+            scene["display_prompt"] = (f"@{boundary[0]} → @{boundary[1]}\n开场：{scene.get('start_state', '')}"
+                                        f"\n收尾：{scene.get('end_state', '')}\n本镜：{scene.get('visual', '')} {scene.get('action', '')}")
+    if not text_only and "end_state" in changed.get(count-1, {}):
         result["final_image_prompt"] = _boundary_image_prompt(result["scenes"][-1]["end_state"],
                                                                 facts=result["scenes"][-1].get("end_facts"), inherited=True,
                                                                 environment_anchor=scene_environment_anchor(result["scenes"][-1], result.get("environment_anchor"), ending=True),
                                                                 composition=result["scenes"][-1].get("composition", ""),
                                                                 reference_roles=result["scenes"][-1].get("reference_roles"))
-    if "结束帧" in edits and "image_prompt" in edits["结束帧"]:
+    if not text_only and "结束帧" in edits and "image_prompt" in edits["结束帧"]:
         result["final_image_prompt"] = lock_environment_prompt(_clean(edits["结束帧"]["image_prompt"]),
                                                                scene_environment_anchor(result["scenes"][-1], result.get("environment_anchor"), ending=True))
     if "structured_scenes" in result:

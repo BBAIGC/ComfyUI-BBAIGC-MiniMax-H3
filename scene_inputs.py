@@ -67,6 +67,31 @@ def resolve_canvas(reference, aspect: str, resolution: str,
     return width, height, detail
 
 
+def resolve_text_canvas(aspect: str, resolution: str,
+                        custom_width: int, custom_height: int) -> tuple[int, int, str]:
+    """Resolve a text-only canvas without making or reading a reference image."""
+    if aspect not in ASPECTS or resolution not in RESOLUTIONS:
+        raise ValueError("请选择有效的画幅与生成档位。")
+    if aspect == "跟随图片":
+        raise ValueError("文生视频没有参考图，请选择明确比例或自定义画幅。")
+    if aspect == "自定义":
+        if (type(custom_width) is not int or type(custom_height) is not int or
+                not 64 <= custom_width <= 2048 or not 64 <= custom_height <= 2048):
+            raise ValueError("自定义宽高应为64～2048之间的整数。")
+        return (_align(custom_width), _align(custom_height),
+                f"自定义{custom_width}×{custom_height}，按H3的32倍数对齐")
+    ratio = {"16:9 横屏": 16 / 9, "9:16 竖屏": 9 / 16, "1:1 方形": 1.0,
+             "4:3 横屏": 4 / 3, "3:4 竖屏": 3 / 4}[aspect]
+    short = _align({"384P 快速": 384, "480P": 480, "720P": 720, "1080P": 1080}[resolution])
+    raw_width, raw_height = ((short * ratio, short) if ratio >= 1 else (short, short / ratio))
+    scale = min(1.0, 2048 / max(raw_width, raw_height))
+    width, height = _align(raw_width * scale), _align(raw_height * scale)
+    detail = f"{aspect}，{resolution}生成档位，32倍数对齐"
+    if scale < 1:
+        detail += "；因长边上限2048已降低尺寸"
+    return width, height, detail
+
+
 def fit_reference(image, width: int, height: int, mode: str):
     """Return one RGB CPU image, preserving geometry by padding or cropping."""
     source_width, source_height = _image_shape(image)

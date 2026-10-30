@@ -150,7 +150,28 @@ def _overrides(raw, count):
             raise ValueError("分镜编辑编号不在当前分镜范围内。")
         result[str(int(key))] = {field: str(item[field]).strip() for field in
                                  ("video_prompt", "image_prompt") if field in item and str(item[field]).strip()}
+        if 'video_seed' in item:
+            seed = item['video_seed']
+            if type(seed) is not int or not 0 <= seed <= 2**32 - 1:
+                raise ValueError('单镜视频种子应为0～4294967295的整数。')
+            result[str(int(key))]['video_seed'] = seed
     return result
+
+
+def resolve_scene_video_seed(base_seed, index, scene=None, override=None):
+    """Keep a selected shot reproducible without changing any image seed."""
+    if type(base_seed) is not int or not 0 <= base_seed <= 2**32 - 1 or type(index) is not int or index < 0:
+        raise ValueError('视频种子或镜头编号无效。')
+    if isinstance(override, dict) and 'video_seed' in override:
+        seed = override['video_seed']
+        if type(seed) is not int or not 0 <= seed <= 2**32 - 1:
+            raise ValueError('单镜视频种子应为0～4294967295的整数。')
+        return seed
+    scene = scene or {}
+    saved = scene.get('video_seed')
+    if scene.get('video_seed_base', base_seed) == base_seed and type(saved) is int and 0 <= saved <= 2**32 - 1:
+        return saved
+    return (base_seed + index) % 2**32
 
 
 def _prompt_body(prompt):
@@ -248,6 +269,11 @@ def _fingerprint(kwargs, refs, durations):
     excluded = {"继续任务", "重做镜头", "执行范围", "分镜覆盖", "unique_id", "prompt", "extra_pnginfo",
                 "保留分镜计划", "计划编辑", "生图重做范围", "重生图片", "手动分镜图片", "_dialogue_track", "导入优化计划", "视频种子"}
     values = {key: value for key, value in kwargs.items() if key not in excluded}
+    if values.get('视频输入', '图生视频') == '图生视频':
+        values.pop('视频输入', None)
+    elif values.get('视频输入') == '文生视频':
+        for name in ('_image_settings', '画幅参考图', '适配方式', '手动分镜图片'):
+            values.pop(name, None)
     values.pop('生图后生成视频',None)
     if values.get('视频短边上限',0)==0:values.pop('视频短边上限',None)
     # Existing V1.1.1 manifests have no format control. The default is identical.
@@ -464,10 +490,12 @@ def _snapshot_event(manifest,node_id):
     event = {key: manifest.get(key) for key in
              ("run_id", "status", "stage", "scene_index", "scene_count", "mode", "final_video", "error", "failure_context", "optimized_script", "effective_settings", "image_jobs", "image_summary", "timings", "output_directory", "plan_available", "plan_reused", "revision", "regeneration_applied", "duration_mode", "timing_mode", "scene_seconds", "total_seconds", "allocation_receipt", "manual_missing", "image_edit_receipts")}
     event.update(node_id=str(node_id), scenes=[{key: scene.get(key) for key in
-                 ("index", "status", "image", "end_image", "video", "prompt", "display_prompt", "image_prompt", "seconds", "error", "video_timing", "plan_fields", "reference_labels", "spoken_dialogues")}
+                 ("index", "status", "image", "end_image", "video", "prompt", "display_prompt", "image_prompt", "seconds", "error", "video_timing", "video_seed", "plan_fields", "reference_labels", "spoken_dialogues")}
                  for scene in manifest.get("scenes", [])])
     event['planning_progress'] = manifest.get('planning_progress')
     event.update(execution_id=manifest.get('execution_id'),prompt_id=manifest.get('prompt_id'),progress_seq=manifest.get('progress_seq',0),updated_at=manifest.get('updated_at'))
+    event['video_input'] = manifest.get('video_input', '文生视频' if manifest.get('mode') == '文生视频' else '图生视频')
+    event['input_mode'] = 'T2VA' if event['video_input'] == '文生视频' else 'I2V'
     event["canvas"] = {"width": manifest.get("width"), "height": manifest.get("height"),
                        "reference_id": manifest.get("canvas_reference_id")}
     for item,scene in zip(event['scenes'],manifest.get('scenes',[])):
@@ -746,7 +774,10 @@ def _tail_repair_receipt(tail_path, original_path, prompt, settings):
 
 
 def _bundle(plan, kwargs):
-    key = tuple(kwargs.get(name) for name in ("基础模型", "原作者模型", "加速权重", "文本编码器", "视频VAE", "音频VAE", "启用加速LoRA", "加速步数", "低显存", "稀疏注意力", "4步LoRA", "8步LoRA"))
+    input_mode = plan.get('input_mode', 'I2V')
+    key = (input_mode,) + tuple(kwargs.get(name) for name in ("基础模型", "原作者模型", "加速权重", "文本编码器", "视频VAE", "音频VAE", "启用加速LoRA", "加速步数", "低显存", "稀疏注意力", "4步LoRA", "8步LoRA"))
+    if input_mode == 'T2VA' and kwargs.get('启用加速LoRA') and kwargs.get('加速权重') != '独立LoRA':
+        raise ValueError('文生视频请使用基础模型或独立加速LoRA；当前融合模型未确认支持无图输入。')
     if _BUNDLE_CACHE.get("key") != key:
         clear_bundle_cache()
         if kwargs.get("加速权重", "独立LoRA") == "原作者融合模型" and kwargs["启用加速LoRA"]:
@@ -774,6 +805,7 @@ def _bundle(plan, kwargs):
                 low_vram=kwargs["低显存"], sparse_attention=kwargs.get("稀疏注意力", True),
                 turbo_lora_4step=kwargs.get("4步LoRA", TURBO_LORA_4STEP),
                 turbo_lora=kwargs.get("8步LoRA", TURBO_LORA),
+                input_mode=input_mode,
             )[0]
         _BUNDLE_CACHE.update(key=key, bundle=result)
     return {**_BUNDLE_CACHE["bundle"], "ready_plan": json.dumps(plan, ensure_ascii=False)}
@@ -960,7 +992,7 @@ class H3StoryboardStudio:
             "目标总秒数": ("FLOAT", {"default": 30.0, "min": 1.0, "max": 1500.0, "step": 0.5}),
         }, "optional": {
             "文本模型配置": ("H3_TEXT_SETTINGS",),
-            "图像模型配置": ("H3_IMAGE_SETTINGS",),
+            "图像模型配置": ("H3_IMAGE_SETTINGS", {'lazy': True}),
             "视频模型配置": ("H3_VIDEO_SETTINGS",),
             "提示词规则": ("H3_PROMPT_RULES",),
             "画幅参考图": ("STRING", {"default": "图1"}),
@@ -974,6 +1006,7 @@ class H3StoryboardStudio:
             "生图后生成视频": ('BOOLEAN',{'default':False}),
             "视频种子": ("INT", {"default": -1, "min": -1, "max": 2**32 - 1,
                                "tooltip": "仅用于视频采样；-1沿用原随机种子，不改变规划或分镜图片。"}),
+            "视频输入": (["图生视频", "文生视频"], {"default": "图生视频"}),
         }, "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
 
     RETURN_TYPES = ("STRING", "H3_MANUAL_SOURCE")
@@ -993,6 +1026,9 @@ class H3StoryboardStudio:
     def IS_CHANGED(cls, **kwargs):
         # Runs must emit fresh progress and consult the disk-backed resume state.
         return float("nan")
+
+    def check_lazy_status(self, 视频输入='图生视频', **kwargs):
+        return ['图像模型配置'] if 视频输入 == '图生视频' and '图像模型配置' in kwargs and kwargs['图像模型配置'] is None else []
 
     def execute(self, **kwargs):
         if not _RUN_LOCK.acquire(blocking=False):
@@ -1014,11 +1050,22 @@ class H3StoryboardStudio:
         from .prompt_presets import normalize_prompt_rules, apply_stage_rules
 
         kwargs = dict(kwargs)
+        video_input = kwargs.get('视频输入', '图生视频')
+        if video_input not in ('图生视频', '文生视频'):
+            raise ValueError('请选择图生视频或文生视频。')
+        text_only = video_input == '文生视频'
+        input_mode = 'T2VA' if text_only else 'I2V'
+        # Omitted/default mode leaves existing image-based task identities intact.
+        if not text_only:
+            kwargs.pop('视频输入', None)
+        else:
+            kwargs.update(生成模式='文生视频', 参考图集='[]', 镜头衔接='仅首帧', 末帧处理='直接续接',
+                          手动分镜图片='[]', 生图重做范围='保留现有图片', 重生图片='[]')
         from .prompt_formats import normalize_prompt_format
         from .reference_upscale import normalize_settings as normalize_upscale
         prompt_format = normalize_prompt_format(kwargs.get("提示词格式"))
         kwargs["提示词格式"] = prompt_format
-        reference_upscale = normalize_upscale(kwargs.get("衔接超分配置", "{}"))
+        reference_upscale = normalize_upscale('{}' if text_only else kwargs.get("衔接超分配置", "{}"))
         kwargs["_reference_upscale"] = reference_upscale
         text_settings = kwargs.pop("文本模型配置", None)
         image_settings = kwargs.pop("图像模型配置", None)
@@ -1034,13 +1081,15 @@ class H3StoryboardStudio:
             kwargs["语言模型"] = text_settings["model"]
             kwargs["_text_settings"] = text_settings
         supplied_image_settings = image_settings is not None
-        if image_settings is None:
+        if text_only:
+            image_settings = None
+        elif image_settings is None:
             image_settings = {"storyboard_long_edge": kwargs.get("分镜图长边", 2048),
                               "reference_long_edge": kwargs.get("参考读取长边", 0)}
         image_settings = normalize_settings(image_settings)
         kwargs.pop("分镜图长边", None)
         kwargs.pop("参考读取长边", None)
-        if supplied_image_settings or image_settings["storyboard_long_edge"] or image_settings["reference_long_edge"]:
+        if not text_only and (supplied_image_settings or image_settings["storyboard_long_edge"] or image_settings["reference_long_edge"]):
             kwargs["_image_settings"] = image_settings
         if video_settings:
             kwargs.update(video_settings)
@@ -1048,15 +1097,21 @@ class H3StoryboardStudio:
         effective_video_seed = resolve_video_seed(kwargs)
         if kwargs.get("加速权重") == "mystic07 · RefDelta r1024 Turbo8":
             kwargs["加速权重"] = "原作者融合模型"
+        if text_only and kwargs.get('启用加速LoRA') and kwargs.get('加速权重') != '独立LoRA':
+            raise ValueError('文生视频请将视频加速权重切为独立LoRA，或关闭加速使用基础模型。')
 
         from .plan_import import parse_import_payload, import_plan
         import_payload = parse_import_payload(kwargs.get("导入优化计划", "{}"))
-        references = resolve_references(kwargs["参考图集"])
+        references = [] if text_only else resolve_references(kwargs["参考图集"])
         script = str(kwargs["剧本"]).strip()
         if not script and import_payload is None:
             raise ValueError("请先输入完整剧本。")
         from .reference_mentions import normalize_reference_mentions
-        script = normalize_reference_mentions(script, len(references))
+        if text_only:
+            from .planner import validate_text_only_references
+            validate_text_only_references(script, references)
+        else:
+            script = normalize_reference_mentions(script, len(references))
         kwargs["剧本"] = script
         _check_mentions(script, references)
         duration_mode = kwargs.get("时长模式", "手动设置")
@@ -1081,12 +1136,13 @@ class H3StoryboardStudio:
         if mode == "末帧高清续接":
             tail_mode = kwargs["末帧处理"] = "Image2.1修复"
         constrained = mode not in TAIL_SEQUENCE_MODES and kwargs["镜头衔接"] == "首尾帧约束"
-        if mode not in MODES or tail_mode not in TAIL_MODES:
+        if (mode not in MODES and not text_only) or tail_mode not in TAIL_MODES:
             raise ValueError("请选择有效的生成模式与末帧处理方式。")
         manual_slots = resolve_manual_images(kwargs.get("手动分镜图片", "[]"), len(durations)) if mode == "手动分镜图" else None
         imported_plan = import_plan(import_payload, count=len(durations), durations=durations, references=references,
                                     mode=mode, voice_mode=kwargs["声音模式"], duration_mode=duration_mode,
-                                    target_total_seconds=target_total, prompt_format=prompt_format) if import_payload is not None else None
+                                    target_total_seconds=target_total, prompt_format=prompt_format,
+                                    input_mode=input_mode) if import_payload is not None else None
         if imported_plan is not None:
             kwargs["_import_plan_identity"] = hashlib.sha256(json.dumps(imported_plan, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         keep_plan = bool(kwargs.get("保留分镜计划", False))
@@ -1110,10 +1166,15 @@ class H3StoryboardStudio:
         if not 0 <= redo <= len(durations):
             raise ValueError("重做镜头不在分镜范围内。")
         fingerprint = _fingerprint(kwargs, references, durations)
-        anchor = _load_image(references[0]["path"])
-        canvas_reference = _canvas_reference(references, kwargs["画幅"], kwargs.get("画幅参考图", "图1"))
-        canvas_source = anchor if canvas_reference is references[0] else _load_image(canvas_reference["path"])
-        width, height, _ = resolve_canvas(canvas_source, kwargs["画幅"], kwargs["生成档位"], kwargs["自定义宽度"], kwargs["自定义高度"])
+        anchor = canvas_reference = canvas_source = None
+        if text_only:
+            from .scene_inputs import resolve_text_canvas
+            width, height, _ = resolve_text_canvas(kwargs['画幅'], kwargs['生成档位'], kwargs['自定义宽度'], kwargs['自定义高度'])
+        else:
+            anchor = _load_image(references[0]["path"])
+            canvas_reference = _canvas_reference(references, kwargs["画幅"], kwargs.get("画幅参考图", "图1"))
+            canvas_source = anchor if canvas_reference is references[0] else _load_image(canvas_reference["path"])
+            width, height, _ = resolve_canvas(canvas_source, kwargs["画幅"], kwargs["生成档位"], kwargs["自定义宽度"], kwargs["自定义高度"])
         short_limit=kwargs.get('视频短边上限',0)
         if type(short_limit) is not int or short_limit<0 or short_limit>1088 or short_limit%32:
             raise ValueError('视频短边上限应为0或32的倍数；0跟随当前档位。')
@@ -1127,7 +1188,8 @@ class H3StoryboardStudio:
             from .image_bridge import storyboard_canvas
             from .reference_upscale import expected_dimensions
             expected_dimensions(*storyboard_canvas(width, height, image_settings["storyboard_long_edge"]), reference_upscale)
-        anchor = fit_reference(anchor, width, height, kwargs["适配方式"])
+        if not text_only:
+            anchor = fit_reference(anchor, width, height, kwargs["适配方式"])
         from .stage_cache import stage_fingerprints, changed_stages, invalidate_saved_videos
         reference_identities=_reference_stage_identities(references)
         stage_ids = stage_fingerprints(kwargs, reference_identities, durations,
@@ -1147,6 +1209,11 @@ class H3StoryboardStudio:
             if old_stage_ids is None:
                 raise ValueError("旧任务的原始设置无法完整核验，已保留原计划和全部图片。请从原任务总览复制完整优化稿，在新任务粘贴后继续；不会自动重做或删除旧图。")
             differences = changed_stages(old_stage_ids, stage_ids)
+            if differences == ['video'] and not text_only:
+                from .stage_cache import compatible_image_video_redo
+                if compatible_image_video_redo(old_stage_ids, stage_ids, kwargs, keep_plan=keep_plan, redo=redo):
+                    differences = []
+                    stage_migrated = True
             if 'planning' not in differences and 'image' in differences:
                 # Existing user-approved images remain usable across an adapter
                 # update only when all original submitted parameters reproduce.
@@ -1190,7 +1257,8 @@ class H3StoryboardStudio:
         if workflow_path:
             manifest.setdefault('workflow_snapshots', []).append({'execution_id': manifest['execution_id'],
                 'prompt_id': manifest.get('prompt_id'), 'path': workflow_path})
-        manifest["canvas_reference_id"] = canvas_reference["id"] if kwargs["画幅"] == "跟随图片" else None
+        manifest["canvas_reference_id"] = canvas_reference["id"] if canvas_reference and kwargs["画幅"] == "跟随图片" else None
+        manifest['video_input'] = video_input
         manifest.pop("failure_context", None)
         manifest.update(duration_mode=duration_mode, timing_mode=duration_mode)
         manifest["prompt_format"] = prompt_format
@@ -1205,7 +1273,7 @@ class H3StoryboardStudio:
         manifest["source_images"] = [{"id": item["id"], "image": _preview(item["path"]), "status": "就绪",'sha256':reference_identities[i]['sha256']}
                                      for i,item in enumerate(references)]
         manifest["effective_settings"] = {"text": text_settings or {"model": kwargs["语言模型"]},
-                                          "image": image_settings,
+                                          "image": None if text_only else image_settings,
                                           "image_seed": int(kwargs["随机种子"]),
                                           "video_seed": effective_video_seed,
                                           "video": {name: kwargs.get(name) for name in (
@@ -1233,6 +1301,8 @@ class H3StoryboardStudio:
                     manifest['planning_progress'] = receipt
                     _emit(manifest, node_id, 'planning')
                 planning_options['progress'] = planning_progress
+                if text_only:
+                    planning_options['input_mode'] = input_mode
                 if prompt_rules is not None:
                     planning_options["prompt_rules"] = prompt_rules
                 if duration_mode == "AI自动分配":
@@ -1300,10 +1370,12 @@ class H3StoryboardStudio:
                     validate_prompt_dialogue(prompt, plan["dialogue_whitelist"], scene_plan.get("dialogues", []))
                 if image_prompt:
                     image_prompt = apply_stage_rules(image_prompt, prompt_rules, "image")
-                if not image_prompt:
+                if not image_prompt and not text_only:
                     raise RuntimeError(f"镜头{i + 1}缺少静态画面提示词，请重新规划。")
                 image_changed = scene.get("image_prompt") is not None and scene["image_prompt"] != image_prompt
                 video_changed = scene.get("prompt") is not None and _prompt_body(scene["prompt"]) != _prompt_body(prompt)
+                if 'video_seed' in changed:
+                    video_changed = video_changed or changed['video_seed'] != resolve_scene_video_seed(effective_video_seed, i, scene)
                 if cached_plan and controlled_images and video_changed and not revision_advanced:
                     manifest["revision"] += 1
                     revision_advanced = True
@@ -1329,12 +1401,15 @@ class H3StoryboardStudio:
                     if constrained and i > 0 and mode == "AI生成分镜" and (image_invalid or invalid and not controlled_images):
                         # This image is also the previous clip's endpoint.
                         _invalidate_video(manifest["scenes"][i - 1])
-                sources.append(_reference_ids(scene_plan, references, mode, i))
+                sources.append([] if text_only else _reference_ids(scene_plan, references, mode, i))
                 if not constrained:
                     scene.pop("end_image", None)
                     scene.pop("end_image_path", None)
-                    first_id = f"分镜{i + 1}" if mode in ("AI生成分镜", "手动分镜图") else (f"首帧{i + 1}" if mode in TAIL_SEQUENCE_MODES and i else sources[i][0]["id"])
-                    scene["display_prompt"] = f"@{first_id} 开始\n" + scene["prompt"]
+                    if text_only:
+                        scene['display_prompt'] = scene['prompt']
+                    else:
+                        first_id = f"分镜{i + 1}" if mode in ("AI生成分镜", "手动分镜图") else (f"首帧{i + 1}" if mode in TAIL_SEQUENCE_MODES and i else sources[i][0]["id"])
+                        scene["display_prompt"] = f"@{first_id} 开始\n" + scene["prompt"]
 
             if "结束帧" in regeneration:
                 manifest.pop("final_image_path", None)
@@ -1345,6 +1420,9 @@ class H3StoryboardStudio:
                 manifest.pop("final_path", None)
 
             for i, scene in enumerate(manifest["scenes"]):
+                if text_only:
+                    scene['display_prompt'] = scene['prompt']
+                    continue
                 if mode in ("AI生成分镜", "手动分镜图"):
                     first_id = f"分镜{i + 1}"
                     end_id = (f"分镜{i + 2}" if i + 1 < len(durations) else "结束帧" if mode == "AI生成分镜" or manual_slots[-1] else None) if constrained else None
@@ -1393,6 +1471,9 @@ class H3StoryboardStudio:
                                                           "completed" if ready else "pending")})
                 manifest["image_jobs"] = jobs
                 _image_summary(manifest)
+            elif text_only:
+                manifest['image_jobs'] = []
+                _image_summary(manifest)
             elif mode in TAIL_SEQUENCE_MODES and tail_mode == "Image2.1修复":
                 previous_jobs = {job["id"]: job for job in manifest.get("image_jobs", [])}
                 jobs = []
@@ -1429,6 +1510,8 @@ class H3StoryboardStudio:
             # Finish all independent first frames before loading H3. This avoids
             # retaining both image and video models throughout an AI storyboard.
             for i, scene in enumerate(manifest["scenes"]):
+                if text_only:
+                    continue
                 mm.throw_exception_if_processing_interrupted()
                 if mode in TAIL_SEQUENCE_MODES and i > 0:
                     continue
@@ -1561,7 +1644,7 @@ class H3StoryboardStudio:
             if regeneration_requested:
                 manifest["regeneration_applied"] = True
 
-            if kwargs["执行范围"] == "仅准备分镜图" or (mode=='AI生成分镜' and not kwargs.get('生图后生成视频',False) and (not images_ready_before or regeneration_requested)):
+            if not text_only and (kwargs["执行范围"] == "仅准备分镜图" or (mode=='AI生成分镜' and not kwargs.get('生图后生成视频',False) and (not images_ready_before or regeneration_requested))):
                 manifest["status"] = "prepared"
                 timings.finish_stage("total", "pending")
                 event = _emit(manifest, node_id, "prepared")
@@ -1573,7 +1656,9 @@ class H3StoryboardStudio:
                 completed = Path(scene.get("video_path", ""))
                 if completed.is_file() and scene.get("status") == "完成":
                     continue
-                if mode in TAIL_SEQUENCE_MODES and i:
+                if text_only:
+                    first = None
+                elif mode in TAIL_SEQUENCE_MODES and i:
                     previous = manifest["scenes"][i - 1]
                     tail_path = previous.get("tail_path")
                     if not tail_path or not Path(tail_path).is_file():
@@ -1636,9 +1721,11 @@ class H3StoryboardStudio:
                             "_dialogue_track": kwargs.get("_dialogue_track"),
                             "_user_silent": kwargs.get("声音模式") == "静音",
                             "_dialogue_offset_seconds": sum(round(round(seconds * 24) / 24 * 32000) for seconds in durations[:i]) / 32000}
+                scene_seed = resolve_scene_video_seed(effective_video_seed, i, scene, overrides.get(str(i + 1)))
+                scene.update(video_seed=scene_seed, video_seed_base=effective_video_seed)
                 video, last_frame, report = H3GenerateShot().generate(
                     bundle=selected, prompt=scene["prompt"], width=width, height=height,
-                    seconds=durations[i], steps=steps, seed=(effective_video_seed + i) % 2**32,
+                    seconds=durations[i], steps=steps, seed=scene_seed,
                     audio_mode=plan.get("audio_mode", "模型音频"), continue_previous=False,
                     first_frame=first, last_frame=end_frame,
                     sampler_name=kwargs.get("视频采样器", "res_multistep"), scheduler=kwargs.get("视频调度器", "simple"))

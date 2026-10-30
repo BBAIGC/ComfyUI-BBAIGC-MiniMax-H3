@@ -31,7 +31,8 @@ def prepare_export(payload,edits=None,overrides=None):
         for key,changes in overrides.items():edit['scenes'][str(key)]={**edit['scenes'].get(str(key),{}),**changes}
     plan=apply_plan_edits(plan,edit)
     refs=value.get('references',[])
-    _validate_plan(plan,value['durations'],refs)
+    input_mode=plan.get('input_mode','I2V');text_only=input_mode=='T2VA'
+    _validate_plan(plan,value['durations'],refs,input_mode=input_mode)
     # The exported overview must describe the merged plan. Re-import applies
     # this text, so retaining the old overview would undo individual edits.
     from .studio_nodes import _optimized_script
@@ -41,12 +42,13 @@ def prepare_export(payload,edits=None,overrides=None):
         heading=re.match(r'^镜头\s*([1-9]\d*)',block)
         binding=re.search(r'(?m)^(@[^\n]+\s开始(?:[^\n]*\s结束)?)\s*$',block)
         if heading and binding:bindings[int(heading[1])]=binding[1]
-    scenes=[{'seconds':seconds,'display_prompt':bindings.get(i+1,f'@分镜{i+1} 开始 → @{"分镜"+str(i+2) if i+1<len(plan["scenes"]) else "结束帧"} 结束')}
+    scenes=[{'seconds':seconds,'display_prompt':'' if text_only else bindings.get(i+1,f'@分镜{i+1} 开始 → @{"分镜"+str(i+2) if i+1<len(plan["scenes"]) else "结束帧"} 结束')}
             for i,seconds in enumerate(value['durations'])]
     result=export_plan(plan,value['durations'],mode=value.get('mode'),references=refs,optimized_script=_optimized_script(plan,scenes))
     result['source_script']=plan.get('raw_script','')
-    if value.get('reference_files'):result['reference_files']=value['reference_files']
+    if value.get('reference_files') and not text_only:result['reference_files']=value['reference_files']
     if value.get('canvas_settings'):result['canvas_settings']=value['canvas_settings']
+    if text_only:result['video_input_source']='文生视频'
     return result
 
 
@@ -74,15 +76,17 @@ def register_plan_file_routes():
             from .studio_nodes import resolve_references,_optimized_script
             from .plan_import import import_plan
             files=payload.get('reference_files') or data.get('references',[])
+            input_mode=payload['plan'].get('input_mode','I2V');text_only=input_mode=='T2VA'
+            if text_only and files:raise ValueError('文生视频计划不能导入参考图片。')
             inputs=[]
             for entry in files:
                 if entry.get('type','input')!='input':raise ValueError('参考图片请先上传到当前ComfyUI输入目录。')
                 name='/'.join(str(entry.get(key,'')).strip('/') for key in ('subfolder','filename') if entry.get(key))
                 inputs.append({'id':entry['id'],'filename':name})
-            references=resolve_references(json.dumps(inputs))
-            plan=import_plan(payload,count=len(payload['durations']),durations=payload['durations'],references=references,mode=payload.get('mode','AI生成分镜'),voice_mode=payload['plan']['speech_mode'],prompt_format=payload.get('prompt_format',payload['plan'].get('prompt_format','工作台格式')))
+            references=[] if text_only else resolve_references(json.dumps(inputs))
+            plan=import_plan(payload,count=len(payload['durations']),durations=payload['durations'],references=references,mode=payload.get('mode','AI生成分镜'),voice_mode=payload['plan']['speech_mode'],prompt_format=payload.get('prompt_format',payload['plan'].get('prompt_format','工作台格式')),input_mode=input_mode)
             if not payload.get('optimized_script'):
-                scenes=[{'seconds':seconds,'display_prompt':scene.get('display_prompt',f'@分镜{i+1} 开始')} for i,(scene,seconds) in enumerate(zip(plan['scenes'],payload['durations']))]
+                scenes=[{'seconds':seconds,'display_prompt':'' if text_only else scene.get('display_prompt',f'@分镜{i+1} 开始')} for i,(scene,seconds) in enumerate(zip(plan['scenes'],payload['durations']))]
                 payload['optimized_script']=_optimized_script(plan,scenes)
             payload['plan']=plan;payload['source_script']=plan.get('raw_script','')
             return web.json_response({'payload':payload,'references':inputs})
