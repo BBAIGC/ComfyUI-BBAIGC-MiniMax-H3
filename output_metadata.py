@@ -2,15 +2,126 @@
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from collections import OrderedDict
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
+from threading import Lock
 from uuid import uuid4
 
 
 _METADATA = ContextVar("h3_output_metadata", default=None)
+_PROMPT_RECEIPTS = OrderedDict()
+_RECEIPT_LOCK = Lock()
+
+
+def _ancestors(prompt, identity):
+    if not isinstance(prompt, dict):
+        return {}
+    pending = [str(identity)] if identity is not None else list(prompt)
+    found = {}
+    while pending and len(found) < 512:
+        key = str(pending.pop(0))
+        node = prompt.get(key)
+        if key in found or not isinstance(node, dict):
+            continue
+        inputs = node.get('inputs', {})
+        if not isinstance(inputs, dict):
+            continue
+        found[key] = {'class_type': node.get('class_type'), 'inputs': inputs}
+        for value in inputs.values():
+            if (isinstance(value, (list, tuple)) and len(value) == 2 and
+                    isinstance(value[0], (str, int)) and type(value[1]) is int and
+                    str(value[0]) in prompt):
+                pending.append(str(value[0]))
+    return {} if pending else found
+
+
+def _receipt_key(prompt, identity):
+    nodes = _ancestors(prompt, identity)
+    if str(identity) not in nodes:
+        return None
+    try:
+        payload = json.dumps(nodes, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        return None
+    return str(identity), hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def _remember(prompt, identity, value):
+    key = _receipt_key(prompt, identity)
+    if key is None:
+        return
+    with _RECEIPT_LOCK:
+        _PROMPT_RECEIPTS[key] = value
+        _PROMPT_RECEIPTS.move_to_end(key)
+        while len(_PROMPT_RECEIPTS) > 256:
+            _PROMPT_RECEIPTS.popitem(last=False)
+
+
+def _receipt(prompt, identity):
+    key = _receipt_key(prompt, identity)
+    with _RECEIPT_LOCK:
+        saved = _PROMPT_RECEIPTS.get(key)
+        return dict(saved) if saved else None
+
+
+def remember_source_prompt(prompt, unique_id, original):
+    """Keep the actual source, including a resolved external text input."""
+    _remember(prompt, unique_id, {'original': str(original), 'kind': 'image'})
+
+
+def remember_prompt_result(prompt, unique_id, source, text, optimized=True):
+    """Record execution results by their exact upstream API inputs, never by last node id."""
+    original = str(source or '')
+    nodes = _ancestors(prompt, unique_id)
+    frozen = nodes.get(str(unique_id), {}).get('inputs', {}).get('固定优化结果') is True
+    if not frozen:
+        for identity, node in nodes.items():
+            if node.get('class_type') == 'CodexQwenStudioPrompt':
+                saved = _receipt(prompt, identity)
+                if saved is not None:
+                    original = saved['original']
+                    break
+    _remember(prompt, unique_id, {'version': 1, 'kind': 'image', 'original': original,
+                                 'optimized': str(text) if optimized else ''})
+    return original
+
+
+def enrich_prompt_metadata(prompt, metadata, unique_id=None):
+    """Attach only verified results belonging to this output's upstream graph."""
+    nodes = _ancestors(prompt, unique_id)
+    for kind in ('CodexPromptOptimize', 'CodexQwenStudioPrompt'):
+        for identity, node in nodes.items():
+            if node.get('class_type') != kind:
+                continue
+            saved = _receipt(prompt, identity)
+            inputs = node.get('inputs', {})
+            if (saved is None and kind == 'CodexPromptOptimize' and
+                    inputs.get('固定优化结果') is True and
+                    isinstance(inputs.get('固定优化文本'), str) and inputs['固定优化文本'].strip()):
+                saved = {'version': 1, 'kind': 'image',
+                         'original': str(inputs.get('固定原始文本') or ''),
+                         'optimized': inputs['固定优化文本']}
+            if saved is not None:
+                metadata['codex_prompts'] = {'version': 1, 'optimized': '', **saved}
+                return metadata
+    return metadata
+
+
+def set_story_prompt_metadata(original, optimized, scenes):
+    metadata = _METADATA.get()
+    if not isinstance(metadata, dict) or _disabled():
+        return
+    metadata['codex_prompts'] = {
+        'version': 1, 'kind': 'h3', 'original': str(original or ''),
+        'optimized': str(optimized or ''),
+        'image_prompts': [str(scene.get('image_prompt') or '') for scene in scenes],
+        'video_prompts': [str(scene.get('prompt') or '') for scene in scenes],
+    }
 
 
 def _disabled():

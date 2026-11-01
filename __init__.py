@@ -15,6 +15,7 @@ from .dialogue_audio import DIALOGUE_NODE_CLASS_MAPPINGS, DIALOGUE_NODE_DISPLAY_
 from .audio_timeline import register_audio_timeline_routes
 from .dialogue_tts import register_dialogue_tts_routes
 from .image_tools import NODE_CLASS_MAPPINGS as IMAGE_TOOLS, NODE_DISPLAY_NAME_MAPPINGS as IMAGE_TOOL_NAMES
+from .description_cache import register_epoch_normalizer
 from .subtitle_nodes import NODE_CLASS_MAPPINGS as SUBTITLES, NODE_DISPLAY_NAME_MAPPINGS as SUBTITLE_NAMES
 from .subtitle_nodes import register_subtitle_routes
 from .manual_plan import NODE_CLASS_MAPPINGS as MANUAL_PLANS, NODE_DISPLAY_NAME_MAPPINGS as MANUAL_PLAN_NAMES
@@ -37,6 +38,7 @@ register_subtitle_routes()
 register_plan_file_routes()
 register_result_routes()
 register_speech_routes()
+register_epoch_normalizer()
 
 NODE_CLASS_MAPPINGS = {**PROMPT_NODE_CLASS_MAPPINGS, **SHOT_NODE_CLASS_MAPPINGS,
                        **PLANNER_NODE_CLASS_MAPPINGS, **RENDER_NODE_CLASS_MAPPINGS,
@@ -78,7 +80,7 @@ NODE_CLASS_MAPPINGS.update(_PORTABLE)
 NODE_DISPLAY_NAME_MAPPINGS.update(_PORTABLE_NAMES)
 from .bbaigc_updates import register_update_routes
 register_update_routes()
-__version__ = "1.2.12"
+__version__ = "1.2.25"
 for _class in NODE_CLASS_MAPPINGS.values():
     _class.CATEGORY = "BBAIGC/" + str(getattr(_class, "CATEGORY", "工作台")).split("/", 1)[-1]
 

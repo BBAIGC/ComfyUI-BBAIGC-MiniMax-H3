@@ -1,3 +1,4 @@
+import {hideNativeWidget} from './nodes2_dom_compat.js';
 import {app} from '/scripts/app.js';
 import {changeUpscaleSetting, scalePairs, totalScales} from './reference_upscale.js';
 import {imageModels,modelFamily,cloudCapabilities} from './cloud_models.js';
@@ -98,7 +99,7 @@ function install(node) {
     style();
     const config = field(node, '控件映射');
     if (!config) return;
-    config.hidden = true; config.computeSize = () => [0, -4];
+    hideNativeWidget(config); config.computeSize = () => [0, -4];
     if (config.inputEl) config.inputEl.style.display = 'none';
     const root = el('div', 'qws-controls');
     root.setAttribute('aria-label', '统一控制中心');
@@ -588,9 +589,10 @@ function install(node) {
         if(cloudConnection)refreshers.push(cloudConnection.sync);
         refresh();
     }
-    const dom=node.addDOMWidget('统一控制','CODEX_QWEN_CONTROLS',root,{serialize:false,canvasOnly:true,hideInPanel:true,getMinHeight:()=>500,getMaxHeight:()=>Math.max(500,node.size[1]-75)});
+    const dom=node.addDOMWidget('统一控制','CODEX_QWEN_CONTROLS',root,{serialize:false,canvasOnly:false,hideInPanel:true,getMinHeight:()=>500});
     dom.beforeQueued=()=>{syncOptimizationTarget();prepareQueuedSeeds();};
-    dom.computeSize = width => [width, Math.max(500,node.size[1]-75)];
+    dom.computeSize = undefined;
+    dom.computeLayoutSize = () => ({minWidth:0,minHeight:500,maxHeight:undefined});
     const observer=new ResizeObserver(entries=>{const width=entries[0]?.contentRect.width||1100;root.dataset.columns=width<520?'1':width<850?'2':'3';});observer.observe(root);
     const configured=node.onConfigure;node.onConfigure=function(){const result=configured?.apply(this,arguments);stateIdentity=null;requestAnimationFrame(render);return result;};
     const serialized=node.onSerialize;node.onSerialize=function(saved){syncOptimizationTarget();syncProfiles();const result=serialized?.apply(this,arguments);saved.properties||={};for(const key of ['codex_qwen_sampling_profiles','codex_qwen_folds','codex_seed_modes'])if(node.properties?.[key])saved.properties[key]=JSON.parse(JSON.stringify(node.properties[key]));saved.properties.codex_qwen_visible_loras=node.properties.codex_qwen_visible_loras;return result;};

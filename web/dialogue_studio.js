@@ -1,3 +1,4 @@
+import {hideNativeWidget} from './nodes2_dom_compat.js';
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
@@ -7,7 +8,7 @@ const button=(text,action)=>{const item=el("button",text);item.type="button";ite
 const mediaURL=item=>item?.filename?api.apiURL(`/view?${new URLSearchParams({filename:item.filename,subfolder:item.subfolder||"",type:item.type||"input"})}`):"";
 const clone=value=>JSON.parse(JSON.stringify(value));
 const seconds=value=>Math.round(Number(value)*100)/100;
-function hide(widget){if(!widget)return;widget.hidden=true;widget.computeSize=()=>[0,-4];if(widget.inputEl)widget.inputEl.style.display="none";if(widget.element)widget.element.style.display="none";}
+function hide(widget){if(!widget)return;hideNativeWidget(widget);widget.computeSize=()=>[0,-4];if(widget.inputEl)widget.inputEl.style.display="none";if(widget.element)widget.element.style.display="none";}
 
 function style(){
     if(document.getElementById("h3-dialogue-studio-style"))return;
@@ -138,7 +139,7 @@ function setup(node){
         try{const result=await request("/h3-director/dialogue/mux",{run_id:snap.run_id,audio:data.mixed_audio,replace});if(result.video){snap.final_video=result.video;source().properties.h3_director_preview=snap;source()._h3Studio?.receive?.({h3_storyboard:snap});renderSource();}note(replace?"配音已保存，原成片备份已保留。":"已另存配音成片，原视频保留。");}catch(error){note(error.message,true);}finally{busy=false;renderControls();}
     }
     function render(){countLabel.textContent=`${data.lines.length}句`;durationLabel.textContent=`${seconds(data.total_seconds||0)}秒`;zoom.value=String(data.zoom||30);device.value=data.device||"auto";renderVoices();renderLines();renderTimeline();renderMixedPlayer();renderSource();renderControls();}
-    const panel=node.addDOMWidget("对白配音工作区","h3-dialogue-studio",root,{serialize:false,hideOnZoom:false,canvasOnly:true,hideInPanel:true});panel.serialize=false;panel.computeSize=undefined;panel.computeLayoutSize=()=>({minWidth:530,minHeight:460,maxHeight:Infinity});node.size=[Math.max(570,node.size?.[0]||0),Math.max(680,node.size?.[1]||0)];
+    const panel=node.addDOMWidget("对白配音工作区","h3-dialogue-studio",root,{serialize:false,hideOnZoom:false,canvasOnly:false,hideInPanel:true});panel.serialize=false;panel.computeSize=undefined;panel.computeLayoutSize=()=>({minWidth:530,minHeight:460,maxHeight:Infinity});node.size=[Math.max(570,node.size?.[0]||0),Math.max(680,node.size?.[1]||0)];
     root.addEventListener("pointerdown",event=>event.stopPropagation());root.addEventListener("keydown",event=>event.stopPropagation());root.addEventListener("wheel",event=>event.stopPropagation(),{passive:true});
     const sourceProgress=event=>{if(disposed||String(event.detail?.node_id)!==String(source()?.id))return;queueMicrotask(()=>{if(disposed)return;renderSource();});const signature=JSON.stringify([event.detail?.run_id,event.detail?.plan_export?.plan?.dialogue_whitelist]);if(signature!==lastSourceSignature){lastSourceSignature=signature;if(data.lines.length)note("工作台对白已更新，可重新导入对白。");}};api.addEventListener("h3-director-progress",sourceProgress);
     const originalConfigure=node.onConfigure;node.onConfigure=function(){const result=originalConfigure?.apply(this,arguments);for(const widget of widgets.values())hide(widget);read();render();restoreJob();if(this.mode===4&&this.properties?.h3_dialogue_compact_version!=="1.2.0"){this.flags||={};this.flags.collapsed=true;this.properties||={};this.properties.h3_dialogue_compact_version="1.2.0";}return result;};

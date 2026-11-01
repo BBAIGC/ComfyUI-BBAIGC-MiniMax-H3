@@ -1,3 +1,4 @@
+import {hideNativeWidget} from './nodes2_dom_compat.js';
 import {app} from '/scripts/app.js';
 import {api} from '/scripts/api.js';
 
@@ -87,7 +88,7 @@ function recordingStyles(){if(document.getElementById('codex-speech-live-style')
 
 export function installSpeechInput(node){
  if(node._codexSpeechInstalled)return node._codexSpeechController;node._codexSpeechInstalled=true;styles();recordingStyles();
- for(const name of fields){const widget=field(node,name);if(widget){widget.hidden=true;widget.computeSize=()=>[0,-4];if(widget.inputEl)widget.inputEl.style.display='none';}}
+ for(const name of fields){const widget=field(node,name);if(widget){hideNativeWidget(widget);widget.computeSize=()=>[0,-4];if(widget.inputEl)widget.inputEl.style.display='none';}}
  const root=el('div','codex-speech'),header=el('div','codex-speech-head'),title=el('strong','','语音输入'),badge=el('small','','SenseVoice · 本机'),enabled=el('button','speech-toggle'),enabledText=el('span'),row=el('div','codex-speech-row'),record=el('button','speech-mic codex-speech-primary'),recordText=el('span','','开始录音'),upload=el('button','','上传音频'),file=el('input'),mode=el('select','speech-mode'),live=el('div','codex-speech-live'),cancel=el('button','speech-cancel'),wave=el('div','speech-wave'),finish=el('button','speech-stop'),state=el('div','codex-speech-state'),indicator=el('i','speech-indicator'),status=el('strong','','未启用'),elapsed=el('span'),editor=el('textarea','codex-speech-editor'),footer=el('div','codex-speech-footer'),count=el('small'),copy=el('button','','复制文字'),clear=el('button','','清空'),details=el('details'),settings=el('div','codex-speech-row'),language=el('select'),normal=el('button','speech-toggle'),normalText=el('span'),threads=el('input'),silence=el('select'),player=el('audio'),modelRow=el('div','codex-speech-row'),unload=el('button','','立即卸载模型'),unloadBefore=el('button','speech-toggle');
  root.dataset.bbaigcPanel='true';
  const lifetime=new AbortController(),subscribers=new Set();let requestController=null,disposed=false,busy=false,recording=false,starting=false,stream=null,context=null,source=null,processor=null,mute=null,segmenter=null,manualChunks=[],manualSamples=0,startedAt=0,tick=null,previewURL=null,session=0,queue=[],requestStarted=0,volume=0;
@@ -135,7 +136,7 @@ export function installSpeechInput(node){
  const executed=node.onExecuted;node.onExecuted=function(message){const result=executed?.apply(this,arguments);const text=Array.isArray(message?.text)?message.text.at(-1):null;if(typeof text==='string'&&!recording&&!busy){write('识别文字',text);editor.value=text;note('识别完成','done');}refresh();return result;};
  const oldRemoved=node.onRemoved;node.onRemoved=function(){disposed=true;session++;queue=[];requestController?.abort();lifetime.abort();stopTick();void stopAudio();subscribers.clear();if(previewURL)URL.revokeObjectURL(previewURL);player.removeAttribute('src');return oldRemoved?.apply(this,arguments);};
  const controller={start:startRecording,finish:()=>stopRecording(true),cancel:cancelRecording,snapshot,subscribe(fn){subscribers.add(fn);fn(snapshot());return ()=>subscribers.delete(fn);},setMode(next){if(recording||starting||busy)return;node.properties||={};node.properties.codex_speech_mode=next==='manual'?'manual':'auto';node.graph?.setDirtyCanvas?.(true,true);refresh();notify();}};node._codexSpeechController=controller;
- node.addDOMWidget('语音输入面板','CODEX_SPEECH_INPUT',root,{serialize:false,canvasOnly:true,hideInPanel:true,getMinHeight:()=>405,getMaxHeight:()=>10000});
+ node.addDOMWidget('语音输入面板','CODEX_SPEECH_INPUT',root,{serialize:false,canvasOnly:false,hideInPanel:true,getMinHeight:()=>405,getMaxHeight:()=>10000});
  if(node.size?.[0]<480||node.size?.[1]<475)node.setSize([Math.max(500,node.size?.[0]||0),Math.max(490,node.size?.[1]||0)]);requestAnimationFrame(refresh);return controller;
 }
 

@@ -1,3 +1,4 @@
+import {hideNativeWidget} from './nodes2_dom_compat.js';
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { H3_STUDIO_VERSION } from "./version.js";
@@ -36,7 +37,7 @@ function installStyle(){
     `;document.head.append(style);
 }
 
-function hide(widget){if(!widget)return;widget.hidden=true;widget.computeSize=()=>[0,-4];if(widget.inputEl)widget.inputEl.style.display="none";if(widget.element)widget.element.style.display="none";}
+function hide(widget){if(!widget)return;hideNativeWidget(widget);widget.computeSize=()=>[0,-4];if(widget.inputEl)widget.inputEl.style.display="none";if(widget.element)widget.element.style.display="none";}
 
 function setup(node){
     installStyle();
@@ -192,7 +193,7 @@ function setup(node){
         isBusy:()=>busy,
         restoreIsolation:()=>setIsolation(false),
     };
-    const widget=node.addDOMWidget("独立生图工作区","h3-manual-images",root,{serialize:false,hideOnZoom:false,canvasOnly:true,hideInPanel:true});
+    const widget=node.addDOMWidget("独立生图工作区","h3-manual-images",root,{serialize:false,hideOnZoom:false,canvasOnly:false,hideInPanel:true});
     widget.computeLayoutSize=()=>({minWidth:470,minHeight:500,maxHeight:Infinity});
     node.size=[Math.max(490,node.size?.[0]||0),Math.max(980,node.size?.[1]||0)];
     root.addEventListener("pointerdown",event=>event.stopPropagation());root.addEventListener("keydown",event=>event.stopPropagation());root.addEventListener("wheel",event=>event.stopPropagation(),{passive:true});

@@ -71,6 +71,8 @@ class CodexQwenStudioPrompt:
         text = re.sub(r'(?:@?(?:参考图|图)|@ref)([1-9]\d*)(?!\d)', replace, text, flags=re.I)
         records = [{**entry, 'slot': slots.get(entry['id'], entry.get('slot'))}
                    for entry in (参考图集 or {}).get('entries', [])]
+        from .output_metadata import remember_source_prompt
+        remember_source_prompt(prompt, unique_id, 原始提示词)
         return {'ui': {'codex_source_text': [原始提示词], 'codex_reference_map': [records]}, 'result': (text,)}
 
 
@@ -160,7 +162,7 @@ class CodexQwenStudioResults:
                 'optional': {'参考图集': ('CODEX_REFERENCES',),
                              '修复已启用': ('BOOLEAN', {'default': False}),
                              '超分已启用': ('BOOLEAN', {'default': False})},
-                'hidden': {'prompt': 'PROMPT', 'extra_pnginfo': 'EXTRA_PNGINFO'}}
+                'hidden': {'prompt': 'PROMPT', 'extra_pnginfo': 'EXTRA_PNGINFO', 'unique_id': 'UNIQUE_ID'}}
 
     RETURN_TYPES = ()
     FUNCTION = 'execute'
@@ -168,10 +170,10 @@ class CodexQwenStudioResults:
     CATEGORY = 'Codex/千问工作台'
 
     def execute(self, 生成图, 修复图, 超分图, 参考图集=None, 修复已启用=False, 超分已启用=False,
-                prompt=None, extra_pnginfo=None):
+                prompt=None, extra_pnginfo=None, unique_id=None):
         def preview(image, name):
             return CodexImageOutput().execute(image, '预览（不保存）', 'Qwen工作台/' + name,
-                                              prompt=prompt, extra_pnginfo=extra_pnginfo)['ui']['images']
+                                              prompt=prompt, extra_pnginfo=extra_pnginfo, unique_id=unique_id)['ui']['images']
         references = []
         collection = 参考图集 or {}
         for index, image in enumerate(collection.get('images', [])):

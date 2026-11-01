@@ -1433,6 +1433,8 @@ class H3StoryboardStudio:
                         end_id = sources[i + 1][0]["id"] if i + 1 < len(durations) else references[len(durations)]["id"] if len(references) > len(durations) else None
                 scene["display_prompt"] = f"@{first_id} 开始" + (f" → @{end_id} 结束" if end_id else "") + "\n" + scene["prompt"]
             manifest["optimized_script"] = _optimized_script(plan, manifest["scenes"])
+            from .output_metadata import set_story_prompt_metadata
+            set_story_prompt_metadata(kwargs.get("剧本"), manifest["optimized_script"], manifest["scenes"])
             # Commit this receipt only after every old video has been invalidated.
             # A cancelled preflight must not make the next run reuse the old soundtrack.
             if dialogue_track is not None:
@@ -1633,6 +1635,7 @@ class H3StoryboardStudio:
                     scene["prompt"] = apply_stage_rules(scene["prompt"], prompt_rules, "video")
                     scene["prompt"] = video_prompt_for_format(scene["prompt"], prompt_format)
                 manifest["optimized_script"] = _optimized_script(plan, manifest["scenes"])
+                set_story_prompt_metadata(kwargs.get("剧本"), manifest["optimized_script"], manifest["scenes"])
                 if mode == "AI生成分镜" and final_path.is_file():
                     _image_job_complete(manifest, "结束帧", _preview(final_path))
                     timings.finish_image(manifest, "结束帧")

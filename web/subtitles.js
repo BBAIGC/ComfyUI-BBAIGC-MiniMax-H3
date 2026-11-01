@@ -1,3 +1,4 @@
+import {hideNativeWidget} from './nodes2_dom_compat.js';
 import {app} from '/scripts/app.js';
 import {api} from '/scripts/api.js';
 const widget=(node,name)=>node.widgets?.find(w=>w.name===name);
@@ -21,7 +22,7 @@ function mount(node){
  function preview(){const current=data?.lines?.find(row=>row.start<=video.currentTime&&row.end>video.currentTime);caption.textContent=data?(current?.text||''):'拖动字幕预览调整位置';style();}
  function fit(){const ratio=data?.width&&data?.height?data.width/data.height:9/16;const width=Math.max(80,Math.min((root.clientWidth||540)-18,420*ratio));stage.style.width=`${width}px`;stage.style.height=`${width/ratio}px`;stage.style.alignSelf='center';style();}
  function render(){rows.replaceChildren();for(const row of data?.lines||[]){const line=document.createElement('div');line.style.cssText='display:grid;grid-template-columns:65px 65px 1fr 24px;gap:4px';for(const key of ['start','end','text']){const input=document.createElement('input');input.type=key==='text'?'text':'number';if(key!=='text'){input.step='0.01';input.min='0';}input.value=row[key];input.setAttribute('aria-label',key==='start'?'开始秒':key==='end'?'结束秒':'字幕内容');input.style.cssText='width:100%;min-width:0;box-sizing:border-box;background:var(--comfy-input-bg);color:var(--input-text);border:1px solid var(--border-color)';input.onchange=()=>{row[key]=key==='text'?input.value:Number(input.value);save();preview();};line.append(input);}const remove=document.createElement("button");remove.type="button";remove.textContent="×";remove.setAttribute("aria-label","删除字幕");remove.onclick=()=>{data.lines.splice(data.lines.indexOf(row),1);save();render();};line.append(remove);rows.append(line);}fit();preview();}
- const edit=widget(node,'编辑字幕');if(edit){edit.hidden=true;if(edit.inputEl)edit.inputEl.style.display='none';edit.computeSize=()=>[0,-4];}
+ const edit=widget(node,'编辑字幕');if(edit){hideNativeWidget(edit);if(edit.inputEl)edit.inputEl.style.display='none';edit.computeSize=()=>[0,-4];}
  for(const name of ['横向位置','纵向位置','颜色','字号','字体','黑色描边']){const w=widget(node,name),old=w?.callback;if(w)w.callback=function(){old?.apply(this,arguments);style();};}
  caption.onpointerdown=event=>{event.preventDefault();event.stopPropagation();caption.setPointerCapture(event.pointerId);video.pause();};
  caption.onpointermove=event=>{if(!caption.hasPointerCapture(event.pointerId))return;const rect=stage.getBoundingClientRect();set('横向位置',Math.round(Math.max(0,Math.min(100,(event.clientX-rect.left)/rect.width*100))));set('纵向位置',Math.round(Math.max(0,Math.min(100,(event.clientY-rect.top)/rect.height*100))));style();};
@@ -32,6 +33,6 @@ function mount(node){
  const removed=node.onRemoved;node.onRemoved=function(){resize.disconnect();spin?.cancel();api.removeEventListener('h3-subtitle-progress',onProgress);api.removeEventListener('h3-director-progress',onVideo);video.pause();video.removeAttribute('src');return removed?.apply(this,arguments);};
  try{data=JSON.parse(get('编辑字幕','{}'));if(!Array.isArray(data.lines))data=null;}catch{}
  status.textContent='默认关闭；连接工作台任务记录后，可在成片完成后自动识别并保存字幕视频。';render();
- node.addDOMWidget('字幕预览与编辑','H3_SUBTITLES',root,{serialize:false,hideInPanel:true,canvasOnly:true,getMinHeight:()=>380});node.size=[Math.max(560,node.size[0]),Math.max(750,node.size[1])];
+ node.addDOMWidget('字幕预览与编辑','H3_SUBTITLES',root,{serialize:false,hideInPanel:true,canvasOnly:false,getMinHeight:()=>380});node.size=[Math.max(560,node.size[0]),Math.max(750,node.size[1])];
 }
 app.registerExtension({name:'H3.LocalSubtitles',beforeRegisterNodeDef(type,data){if(data.name!=='H3Subtitles')return;const created=type.prototype.onNodeCreated;type.prototype.onNodeCreated=function(){const result=created?.apply(this,arguments);mount(this);return result;};}});

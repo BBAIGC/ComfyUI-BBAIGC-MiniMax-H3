@@ -1,3 +1,4 @@
+import {hideNativeWidget} from './nodes2_dom_compat.js';
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { H3_STUDIO_VERSION } from "./version.js";
@@ -511,7 +512,7 @@ function setTimingBadge(badge,label,timing){const value=formatElapsed(timing);co
 
 function hiddenWidget(widget) {
     if (!widget) return;
-    widget.hidden = true;
+    hideNativeWidget(widget);
     widget.computeSize = () => [0, -4];
     if (widget.inputEl) widget.inputEl.style.display = "none";
     if (widget.element) widget.element.style.display = "none";
@@ -2433,7 +2434,7 @@ function setupStudio(node,nodeData) {
     // This workspace owns one live DOM tree. Comfy's parameter inspector also
     // mounts DOM widgets and writes their measured width back to the widget;
     // rendering this tree there would shrink the canvas to the sidebar width.
-    const panel = node.addDOMWidget("h3_director_studio", "h3-studio", root, {serialize:false, hideOnZoom:false,canvasOnly:true,hideInPanel:true,getMinHeight:panelHeight});
+    const panel = node.addDOMWidget("h3_director_studio", "h3-studio", root, {serialize:false, hideOnZoom:false,canvasOnly:false,hideInPanel:true,getMinHeight:panelHeight});
     panel.serialize = false;
     // Older inspector sessions may have left an explicit sidebar width behind.
     // With no override Comfy derives this from the owning node on every draw.

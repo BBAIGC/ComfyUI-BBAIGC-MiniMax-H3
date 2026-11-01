@@ -1,11 +1,11 @@
 {
   "id": "h3",
-  "version": "1.2.12",
+  "version": "1.2.25",
   "author": "BBAIGC",
-  "workflow": "workflows/BBAIGC_h3_V1.2.12.json",
-  "sha256": "69148fdd4e3b1592e0d439aeee2596cc41ffae680efe855b8ae55cc1c2a6ba3a",
+  "workflow": "workflows/BBAIGC_h3_V1.2.25.json",
+  "sha256": "9a147fa74a6b0f0d722771c13e892ea4fca4d03498408a10ec7ea39482bfd561",
   "node_versions": {
-    "core": "1.2.12"
+    "core": "1.2.25"
   },
-  "notes": "新增图生/文生视频滑动切换；字幕按识别时间分成约10字短句，修正空档挂住首条；随机重做仅更换本镜视频种子。"
+  "notes": "修正Nodes 2.0图像主控制与共享DOM面板的高度约束，拉高节点后内容按可用空间展开；同步多图引用、语音与显示兼容。"
 }

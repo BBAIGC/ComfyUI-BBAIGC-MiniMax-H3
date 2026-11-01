@@ -1,3 +1,4 @@
+import {hideNativeWidget} from './nodes2_dom_compat.js';
 import {app} from '/scripts/app.js';
 const field=(node,name)=>node?.widgets?.find(item=>item.name===name);
 const detailLabels=['精简','简洁','标准','详细','极详细'];
@@ -17,7 +18,7 @@ function style(){
 
 function outputMode(node){
  style();const mode=field(node,'输出模式');if(!mode)return;
- mode.hidden=true;mode.computeSize=()=>[0,-4];if(mode.inputEl)mode.inputEl.style.display='none';
+ hideNativeWidget(mode);mode.computeSize=()=>[0,-4];if(mode.inputEl)mode.inputEl.style.display='none';
  const root=document.createElement('div');root.className='codex-output-mode';root.setAttribute('role','radiogroup');root.setAttribute('aria-label','输出模式');
  const indicator=document.createElement('span');root.append(indicator);const buttons=[];
  const render=()=>{const save=mode.value==='保存并预览';indicator.style.transform=`translateX(${save?100:0}%)`;for(const[value,button]of buttons){button.setAttribute('aria-checked',String(value===mode.value));button.tabIndex=value===mode.value?0:-1;}};
@@ -27,26 +28,47 @@ function outputMode(node){
   button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const selected=event.key==='Home'?0:event.key==='End'?1:mode.value==='保存并预览'?0:1;buttons[selected][1].focus();buttons[selected][1].click();};
   buttons.push([value,button]);root.append(button);
  }
- node.addDOMWidget('输出模式切换','CODEX_OUTPUT_MODE',root,{serialize:false,canvasOnly:true,hideInPanel:true,getMinHeight:()=>36,getMaxHeight:()=>36});
+ node.addDOMWidget('输出模式切换','CODEX_OUTPUT_MODE',root,{serialize:false,canvasOnly:false,hideInPanel:true,getMinHeight:()=>36,getMaxHeight:()=>36});
  const configured=node.onConfigure;node.onConfigure=function(){const result=configured?.apply(this,arguments);render();return result;};render();
 }
 
 function promptPanel(node){
  style();const detail=field(node,'详细程度');let refreshDetail=()=>{};
+ for(const name of ['固定优化文本','固定原始文本']){const frozenText=field(node,name);if(frozenText){hideNativeWidget(frozenText);frozenText.computeSize=()=>[0,-4];if(frozenText.inputEl)frozenText.inputEl.style.display='none';}}
  if(detail){
-  detail.hidden=true;detail.computeSize=()=>[0,-4];if(detail.inputEl)detail.inputEl.style.display='none';
+  hideNativeWidget(detail);detail.computeSize=()=>[0,-4];if(detail.inputEl)detail.inputEl.style.display='none';
   const root=document.createElement('div');root.className='codex-prompt-detail';const heading=document.createElement('div'),label=document.createElement('span'),level=document.createElement('output'),range=document.createElement('input');
   label.textContent='提示词详细程度';level.className='codex-detail-label';range.type='range';range.min='1';range.max='5';range.step='1';range.className='codex-detail-range';range.setAttribute('aria-label','提示词详细程度');heading.append(label,level);root.append(heading,range);
   refreshDetail=()=>{const value=detailLevel(detail.value);detail.value=value;range.value=String(value);level.textContent=detailLabels[value-1];range.setAttribute('aria-valuetext',detailLabels[value-1]);};
   const changed=detail.callback;detail.callback=function(){const value=changed?.apply(this,arguments);refreshDetail();return value;};
   range.oninput=()=>{detail.value=detailLevel(range.value);detail.callback?.(detail.value);node.graph?.setDirtyCanvas(true,true);};
-  node.addDOMWidget('详细程度滑块','CODEX_PROMPT_DETAIL',root,{serialize:false,canvasOnly:true,hideInPanel:true,getMinHeight:()=>58,getMaxHeight:()=>58});refreshDetail();
+  node.addDOMWidget('详细程度滑块','CODEX_PROMPT_DETAIL',root,{serialize:false,canvasOnly:false,hideInPanel:true,getMinHeight:()=>58,getMaxHeight:()=>58});refreshDetail();
  }
  const result=document.createElement('textarea');result.readOnly=true;result.placeholder='启用后显示优化结果；关闭时原文直通';result.setAttribute('aria-label','最终生图提示词');
  result.style.cssText='width:100%;height:110px;resize:vertical;box-sizing:border-box;background:var(--comfy-input-bg);color:var(--input-text);border:1px solid var(--border-color);padding:7px;white-space:pre-wrap';
- node.addDOMWidget('优化结果','CODEX_PROMPT_RESULT',result,{serialize:false,canvasOnly:true,hideInPanel:true,getMinHeight:()=>110});
+ const resultOptions={serialize:false,canvasOnly:false,hideInPanel:true,getMinHeight:()=>110};
+ const resultWidget=node.addDOMWidget('优化结果','CODEX_PROMPT_RESULT',result,resultOptions);
+ let externalInstalled=false;
+ const externalLayout=()=>{
+  if(node.properties?.bbaigc_prompt_layout!=='external-large'||externalInstalled)return;
+  externalInstalled=true;
+  const source=field(node,'原始提示词');hideNativeWidget(source);if(source){source.computeSize=()=>[0,-4];if(source.inputEl)source.inputEl.style.display='none';if(source.element)source.element.hidden=true;}
+  const rule=field(node,'前置规则');if(!rule)return;
+  hideNativeWidget(rule);rule.computeSize=()=>[0,-4];if(rule.inputEl)rule.inputEl.style.display='none';if(rule.element)rule.element.hidden=true;
+  const root=document.createElement('div'),label=document.createElement('span'),editor=document.createElement('textarea');root.className='bbaigc-external-rules';root.dataset.bbaigcPanel='true';label.textContent='前置规则';editor.setAttribute('aria-label','前置规则');editor.value=String(rule.value??'');root.append(label,editor);
+  // This opt-in workspace keeps rules readable without assigning the entire
+  // node height to the output preview. The native fields retain their values.
+  root.style.cssText='display:flex;flex-direction:column;gap:7px;box-sizing:border-box;padding:6px 0;min-height:0;overflow:hidden';
+  editor.style.cssText='flex:1 1 0;min-height:260px;resize:none;overflow:auto;width:100%;box-sizing:border-box;padding:9px;border:1px solid var(--border-color,#555);background:var(--comfy-input-bg,#242424);color:var(--input-text,#ddd);font:12px/1.6 sans-serif;white-space:pre-wrap;overscroll-behavior:contain';
+  editor.oninput=()=>{rule.value=editor.value;rule.callback?.(editor.value);node.graph?.setDirtyCanvas(true,true);};
+  for(const name of ['pointerdown','pointerup','keydown','keyup','dblclick','wheel'])root.addEventListener(name,event=>event.stopPropagation());
+  const rules=node.addDOMWidget('前置规则编辑器','CODEX_PROMPT_RULES',root,{serialize:false,canvasOnly:false,hideInPanel:true,getMinHeight:()=>294,getMaxHeight:()=>400});rules.serialize=false;rules.serializeValue=()=>undefined;rules.computeLayoutSize=()=>({minWidth:300,minHeight:294,maxHeight:400});
+  const rulesIndex=node.widgets.indexOf(rules),detailIndex=node.widgets.findIndex(widget=>widget.name==='详细程度滑块');if(rulesIndex>=0&&detailIndex>=0){node.widgets.splice(rulesIndex,1);node.widgets.splice(detailIndex,0,rules);}
+  resultOptions.getMaxHeight=()=>170;resultWidget.computeLayoutSize=()=>({minWidth:300,minHeight:110,maxHeight:170});result.style.minHeight='110px';result.style.maxHeight='170px';result.style.resize='none';
+  const callback=rule.callback;rule.callback=function(){const value=callback?.apply(this,arguments);if(document.activeElement!==editor&&editor.value!==String(rule.value??''))editor.value=String(rule.value??'');return value;};
+ };
  const executed=node.onExecuted;node.onExecuted=function(message){const value=executed?.apply(this,arguments);result.value=(message.text||[]).join('\n');return value;};
- const configured=node.onConfigure;node.onConfigure=function(){const value=configured?.apply(this,arguments);refreshDetail();return value;};
+ const configured=node.onConfigure;node.onConfigure=function(){const value=configured?.apply(this,arguments);refreshDetail();externalLayout();return value;};externalLayout();
  const timer=setInterval(()=>{if(!result.isConnected)return;syncPromptTarget(node);refreshDetail();},700);
  const removed=node.onRemoved;node.onRemoved=function(){clearInterval(timer);return removed?.apply(this,arguments);};
 }

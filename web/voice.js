@@ -1,3 +1,4 @@
+import {hideNativeWidget} from './nodes2_dom_compat.js';
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
@@ -43,7 +44,7 @@ function styles() {
 
 function hide(widget) {
     if (!widget) return;
-    widget.hidden = true;
+    hideNativeWidget(widget);
     widget.computeSize = () => [0, -4];
     if (widget.inputEl) widget.inputEl.style.display = "none";
     if (widget.element) widget.element.style.display = "none";
@@ -119,7 +120,7 @@ function setupVoices(node) {
         }catch(error){message.textContent=error.message;message.classList.add("voice-error");}
         finally{save.disabled=false;}
     };
-    const widget=node.addDOMWidget("角色音色库界面","h3-voices",root,{serialize:false,hideOnZoom:false,canvasOnly:true,hideInPanel:true});
+    const widget=node.addDOMWidget("角色音色库界面","h3-voices",root,{serialize:false,hideOnZoom:false,canvasOnly:false,hideInPanel:true});
     widget.computeSize=()=>[440,440];
     node.size=[Math.max(460,node.size?.[0]||0),Math.max(490,node.size?.[1]||0)];
     const configured=node.onConfigure;
@@ -153,7 +154,7 @@ function setupRuleTitles(node) {
     }
     // One DOMWidget owns all editors. Native widget positions and serialization
     // stay unchanged on ComfyUI frontends which virtualize multiline widgets.
-    const widget=node.addDOMWidget("提示词规则编辑器","h3-rules",root,{serialize:false,hideOnZoom:false,canvasOnly:true,hideInPanel:true});
+    const widget=node.addDOMWidget("提示词规则编辑器","h3-rules",root,{serialize:false,hideOnZoom:false,canvasOnly:false,hideInPanel:true});
     widget.computeSize=()=>[560,1180];
     function applyLock(){
         const locked=node.properties?.h3_prompt_rules_locked===true;

@@ -1,5 +1,7 @@
 import {app} from '/scripts/app.js';
 import {scalePairs,totalScales,changeUpscaleSetting} from './reference_upscale.js';
+import {hideNativeWidget} from './nodes2_dom_compat.js';
+import {appendDescriptionCacheControl,finishDescriptionCache,installDescriptionCacheSerialization,installDescriptionCachePromptGuard} from './description_cache_controls.js';
 const widget=(n,name)=>n.widgets?.find(w=>w.name===name);
 const detailLabels=['精简','简洁','标准','详细','极详细'];
 const detailLevel=value=>Math.max(1,Math.min(5,Math.round(Number(value)||3)));
@@ -30,9 +32,13 @@ function currentLoraList(){
 }
 function visible(w,show){if(!w)return;if(!w._codexSizeSaved){w._codexSizeSaved=true;w._codexSize=w.computeSize;}w.hidden=!show;if(show&&w._codexSize===undefined)delete w.computeSize;else w.computeSize=show?w._codexSize:()=>[0,-4];if(w.inputEl)w.inputEl.style.display=show?'':'none';}
 let serial=100;
-app.registerExtension({name:'Codex.CleanImageTools',refreshComboInNodes(defs){const values=defs.CodexQwenImageLora?.input?.required?.['LoRA文件']?.[0];if(Array.isArray(values)){loraLists.values=values;loraLists.updated=Date.now();}},beforeRegisterNodeDef(type,data){
+app.registerExtension({name:'Codex.CleanImageTools',setup(){installDescriptionCachePromptGuard(app);},refreshComboInNodes(defs){const values=defs.CodexQwenImageLora?.input?.required?.['LoRA文件']?.[0];if(Array.isArray(values)){loraLists.values=values;loraLists.updated=Date.now();}},beforeRegisterNodeDef(type,data){
  if(!data.name.startsWith('Codex')&&!data.name.startsWith('H3'))return;
+ if(['CodexReferenceDescribe','CodexJoyCaptionDescribe'].includes(data.name)){
+  const executed=type.prototype.onExecuted;type.prototype.onExecuted=function(message){const result=executed?.apply(this,arguments);finishDescriptionCache(this.graph,this.id,message);return result;};
+ }
  const create=type.prototype.onNodeCreated;type.prototype.onNodeCreated=function(){const result=create?.apply(this,arguments),node=this;
+ if(['CodexReferenceDescribe','CodexJoyCaptionDescribe'].includes(data.name)){installDescriptionCacheSerialization(node);const epoch=widget(node,'清除缓存批次');hideNativeWidget(epoch);if(epoch)epoch.computeSize=()=>[0,-4];}
   // DOM controls and the canvas share one stacking order on first click.
   const attach=node.addDOMWidget;node.addDOMWidget=function(name,kind,element,options){element.addEventListener('pointerdown',()=>{app.canvas?.bringToFront?.(node);for(const w of node.widgets||[])if(w.element?.parentElement)w.element.parentElement.style.zIndex=String(++serial);},{capture:true});return attach.call(this,name,kind,element,options);};
  if(data.name==='CodexReferenceInputs'){
@@ -65,7 +71,7 @@ app.registerExtension({name:'Codex.CleanImageTools',refreshComboInNodes(defs){co
    const controls=[],foldState=new Map();let samplingController=null,lastProfileState=null;const render=()=>{
     let map;try{map=JSON.parse(config.value);}catch{return;}
     for(const id of new Set((map.fields||[]).map(item=>item.node))){const target=node.graph?.getNodeById(id);if(target?.type!=='936eab8e-d09d-4da1-b8fa-6a38002cb7c3')continue;const sampling=[['steps','采样步数'],['cfg','CFG'],['scheduler','采样器'],['scheduler_1','调度器'],['seed','随机种子']].filter(([name])=>widget(target,name));const names=new Set(sampling.map(([name])=>name));let index=map.fields.findIndex(item=>item.node===id&&names.has(item.widget));if(index<0)index=map.fields.findIndex(item=>item.node===id);map.fields=map.fields.filter(item=>!(item.node===id&&names.has(item.widget)));map.fields.splice(index<0?map.fields.length:index,0,...sampling.map(([name,label])=>({node:id,widget:name,label})));}
-    root.replaceChildren();controls.length=0;const groups=new Map(),bindings=[],slots=[...new Set((map.fields||[]).map(loraControlSlot).filter(Boolean))],bindingKeys=new Set();
+    root.replaceChildren();controls.length=0;appendDescriptionCacheControl(node,map,root,controls);const groups=new Map(),bindings=[],slots=[...new Set((map.fields||[]).map(loraControlSlot).filter(Boolean))],bindingKeys=new Set();
     for(const item of map.fields||[]){const target=node.graph?.getNodeById(item.node),key=samplingControlKey(item,target),field=widget(target,item.widget);if(key&&field&&!bindingKeys.has(key)){bindingKeys.add(key);bindings.push({key,item,field:()=>widget(node.graph?.getNodeById(item.node),item.widget)});}}
     let applyingProfile=false,sourceSelect;const profileRefresh=[];
     const profileState=()=>{if(!slots.length||!bindings.length)return null;node.properties||={};let state=node.properties.codex_lora_sampling_profiles;if(!state||typeof state!=='object'||Array.isArray(state))state=node.properties.codex_lora_sampling_profiles={version:1,source:'base',base:{},slots:{}};state.version=1;state.base||={};state.slots||={};for(const binding of bindings){if(!Object.hasOwn(state.base,binding.key))state.base[binding.key]=binding.field()?.value;for(const slot of slots){state.slots[slot]||={};if(!Object.hasOwn(state.slots[slot],binding.key))state.slots[slot][binding.key]=state.base[binding.key];}}if(state.source!=='base'&&!slots.some(slot=>state.source===`lora-${slot}`))state.source='base';return state;};
@@ -112,7 +118,7 @@ app.registerExtension({name:'Codex.CleanImageTools',refreshComboInNodes(defs){co
     refreshProfiles();
     requestAnimationFrame(resizeControls);
    };
-   const dom=node.addDOMWidget('统一控制','CODEX_CONTROLS',root,{serialize:false,canvasOnly:true,hideInPanel:true,getMinHeight:()=>320,getMaxHeight:()=>Math.max(320,node.size[1]-75)});dom.computeSize=width=>[width,Math.max(320,node.size[1]-75)];const configure=node.onConfigure;node.onConfigure=function(){configure?.apply(this,arguments);lastProfileState=null;requestAnimationFrame(render);};const serialized=node.onSerialize;node.onSerialize=function(saved){const result=serialized?.apply(this,arguments);samplingController?.sync();if(node.properties?.codex_lora_sampling_profiles){saved.properties||={};saved.properties.codex_lora_sampling_profiles=JSON.parse(JSON.stringify(node.properties.codex_lora_sampling_profiles));}return result;};const timer=setInterval(()=>{if(!root.isConnected)return;if(!controls.length)render();else controls.forEach(fn=>fn());resizeControls();},700);const removed=node.onRemoved;node.onRemoved=function(){clearInterval(timer);removed?.apply(this,arguments);};requestAnimationFrame(render);
+   const dom=node.addDOMWidget('统一控制','CODEX_CONTROLS',root,{serialize:false,canvasOnly:false,hideInPanel:true,getMinHeight:()=>320});dom.computeSize=undefined;dom.computeLayoutSize=()=>({minWidth:0,minHeight:320,maxHeight:undefined});const configure=node.onConfigure;node.onConfigure=function(){configure?.apply(this,arguments);lastProfileState=null;requestAnimationFrame(render);};const serialized=node.onSerialize;node.onSerialize=function(saved){const result=serialized?.apply(this,arguments);samplingController?.sync();if(node.properties?.codex_lora_sampling_profiles){saved.properties||={};saved.properties.codex_lora_sampling_profiles=JSON.parse(JSON.stringify(node.properties.codex_lora_sampling_profiles));}return result;};const timer=setInterval(()=>{if(!root.isConnected)return;if(!controls.length)render();else controls.forEach(fn=>fn());resizeControls();},700);const removed=node.onRemoved;node.onRemoved=function(){clearInterval(timer);removed?.apply(this,arguments);};requestAnimationFrame(render);
   }
   return result;
  };

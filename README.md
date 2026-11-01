@@ -4,7 +4,7 @@
 
 ### 一张参考图＋自由剧本，AI 全自动完成本地视频制作
 
-![版本](https://img.shields.io/badge/版本-V1.2.12-1677ff?style=flat-square)
+![版本](https://img.shields.io/badge/版本-V1.2.25-1677ff?style=flat-square)
 ![ComfyUI](https://img.shields.io/badge/ComfyUI-视频工作流-18181b?style=flat-square)
 ![MiniMax](https://img.shields.io/badge/MiniMax-H3-f59e0b?style=flat-square)
 ![Ollama](https://img.shields.io/badge/Ollama-分镜规划-7c3aed?style=flat-square)

@@ -15,6 +15,7 @@ import folder_paths
 import nodes
 from .static_prompt import DESCRIPTION_RULE,REPAIR_RULE,static_text
 from .resource_control import release_resources
+from .description_cache import read_description, write_description, description_result, normalize_epoch
 
 
 def _cache_key(*values):
@@ -105,6 +106,12 @@ class CodexImageCanvas:
 
 class CodexReferenceDescribe:
     @classmethod
+    def VALIDATE_INPUTS(cls,清除缓存批次=0):
+        try:normalize_epoch(清除缓存批次)
+        except ValueError as exc:return str(exc)
+        return True
+
+    @classmethod
     def INPUT_TYPES(cls):
         from .prompt_nodes import local_models
         models=[x for x in local_models() if any(k in x.lower() for k in ('qwen3.5','qwen3.8','qwen3.6','qwen3-vl','gemma4'))]
@@ -115,15 +122,16 @@ class CodexReferenceDescribe:
              '输出上限':('INT',{'default':1024,'min':128,'max':8192}),
              '上下文':('INT',{'default':8192,'min':4096,'max':65536,'step':1024}),
              '温度':('FLOAT',{'default':0.15,'min':0,'max':1,'step':0.05}),
-             'top_p':('FLOAT',{'default':0.9,'min':0.1,'max':1,'step':0.05})}}
+             'top_p':('FLOAT',{'default':0.9,'min':0.1,'max':1,'step':0.05})},
+             'optional':{'清除缓存批次':('INT',{'default':0,'min':0,'max':2147483647})}}
     RETURN_TYPES=('STRING',);RETURN_NAMES=('静态生图提示词',);FUNCTION='describe';CATEGORY='Codex/图像工具'
-    def describe(self,参考图,模型,前置规则,补充要求,读取长边,输出上限,上下文,温度,top_p):
+    def describe(self,参考图,模型,前置规则,补充要求,读取长边,输出上限,上下文,温度,top_p,清除缓存批次=0):
         from .prompt_nodes import LocalOllama
-        key=_cache_key('describe-v2',参考图,模型,前置规则,补充要求,读取长边,输出上限,上下文,温度,top_p)
-        directory=Path(folder_paths.get_temp_directory())/'codex-description-cache';cached=directory/(key+'.json')
-        if cached.is_file():
-            text=json.loads(cached.read_text(encoding='utf-8')).get('text')
-            if isinstance(text,str) and text.strip():return (text,)
+        清除缓存批次=normalize_epoch(清除缓存批次)
+        legacy_key=_cache_key('describe-v2',参考图,模型,前置规则,补充要求,读取长边,输出上限,上下文,温度,top_p)
+        key=_cache_key('describe-v3',参考图,模型,前置规则,补充要求 or '准确描述这张静态图片。',读取长边,输出上限,上下文,温度,top_p,int(清除缓存批次))
+        text=read_description(key,legacy_key if not 清除缓存批次 else None)
+        if text is not None:return description_result(text,清除缓存批次,True)
         p=tensor_path(参考图);buffer=io.BytesIO()
         try:
             with Image.open(p) as image:image.thumbnail((读取长边,读取长边));image.save(buffer,format='JPEG',quality=92)
@@ -134,17 +142,70 @@ class CodexReferenceDescribe:
                     'options':{'temperature':温度,'top_p':top_p,'num_ctx':上下文,'num_predict':输出上限}},timeout=600)
                 text=response.get('message',{}).get('content','').strip()
                 if not text or response.get('done_reason')=='length':raise ValueError('反推结果为空或已截断，请增加输出上限。')
-                text=static_text(text);directory.mkdir(parents=True,exist_ok=True)
-                temp=directory/(key+'.'+uuid.uuid4().hex+'.tmp');temp.write_text(json.dumps({'text':text},ensure_ascii=False),encoding='utf-8');temp.replace(cached)
-                return (text,)
+                text=static_text(text);write_description(key,text)
+                return description_result(text,清除缓存批次,False)
             finally:client.unload(模型);client.close_owned()
         finally:p.unlink(missing_ok=True)
+
+
+class CodexJoyCaptionDescribe:
+    @classmethod
+    def VALIDATE_INPUTS(cls,清除缓存批次=0):
+        try:normalize_epoch(清除缓存批次)
+        except ValueError as exc:return str(exc)
+        return True
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        loader=nodes.NODE_CLASS_MAPPINGS.get('JJC_DownloadAndLoadJoyCaptionModel')
+        modes=loader.INPUT_TYPES()['required']['memory_mode'][0] if loader else ['Maximum Savings (4-bit)']
+        return {'required':{'参考图':('IMAGE',),'模型':('STRING',{'default':'fancyfeast/llama-joycaption-beta-one-hf-llava'}),
+            '显存模式':(modes,),'保持加载':('BOOLEAN',{'default':False}),
+            'system_prompt':('STRING',{'default':'Describe the visible image accurately.','multiline':True}),
+            'user_query':('STRING',{'default':DESCRIPTION_RULE,'multiline':True}),
+            'max_new_tokens':('INT',{'default':768,'min':1,'max':2048}),
+            'temperature':('FLOAT',{'default':0.35,'min':0,'max':2,'step':0.05}),
+            'top_p':('FLOAT',{'default':0.9,'min':0,'max':1,'step':0.01}),
+            'top_k':('INT',{'default':0,'min':0,'max':100})},
+            'optional':{'清除缓存批次':('INT',{'default':0,'min':0,'max':2147483647})}}
+    RETURN_TYPES=('STRING',);RETURN_NAMES=('静态生图提示词',);FUNCTION='describe';CATEGORY='Codex/图像工具'
+    def describe(self,参考图,模型,显存模式,保持加载,system_prompt,user_query,max_new_tokens,temperature,top_p,top_k,清除缓存批次=0):
+        清除缓存批次=normalize_epoch(清除缓存批次)
+        key=_cache_key('joy-describe-v1',参考图,模型,显存模式,保持加载,system_prompt,user_query,max_new_tokens,temperature,top_p,top_k,int(清除缓存批次))
+        text=read_description(key)
+        if text is not None:return description_result(text,清除缓存批次,True)
+        # The predictor is constructed only after the persistent text cache misses.
+        model=_call('JJC_DownloadAndLoadJoyCaptionModel',model=模型,memory_mode=显存模式,keep_loaded=保持加载)[0]
+        text=_call('JJC_JoyCaption_Custom',model=model,image=参考图,system_prompt=system_prompt,user_query=user_query,
+                   max_new_tokens=max_new_tokens,temperature=temperature,top_p=top_p,top_k=top_k)[0]
+        write_description(key,text)
+        return description_result(text,清除缓存批次,False)
+
+
+class CodexReversePromptSave:
+    @classmethod
+    def INPUT_TYPES(cls):
+        original=nodes.NODE_CLASS_MAPPINGS.get('SaveText|pysssss')
+        schema=original.INPUT_TYPES() if original else {'required':{'root_dir':(['output'],),'file':('STRING',{'default':'prompt-cache/zimage.txt'}),'append':(['overwrite','append','new only'],),'insert':('BOOLEAN',{'default':False}),'text':('STRING',{'forceInput':True})}}
+        schema={**schema,'required':dict(schema['required'])}
+        schema['required']['text']=('STRING',{'forceInput':True,'lazy':True})
+        schema['optional']={'使用手动提示词':('BOOLEAN',{'default':False})}
+        return schema
+    RETURN_TYPES=('STRING',);FUNCTION='save';CATEGORY='Codex/图像工具'
+    def check_lazy_status(self,root_dir,file,append,insert,text=None,使用手动提示词=False):
+        return [] if 使用手动提示词 or text is not None else ['text']
+    def save(self,root_dir,file,append,insert,text=None,使用手动提示词=False):
+        if 使用手动提示词:
+            try:return _call('LoadText|pysssss',root_dir=root_dir,file=file)
+            except (OSError,ValueError,KeyError):return ('',)
+        if text is None:raise ValueError('没有收到反推提示词，未覆盖原缓存。')
+        return _call('SaveText|pysssss',root_dir=root_dir,file=file,append=append,insert=insert,text=text)
 
 
 class CodexImageGenerate:
     @classmethod
     def IS_CHANGED(cls,**kwargs):
-        return _cache_key(kwargs.get('提示词',''),kwargs.get('生成路线'),kwargs.get('宽度'),kwargs.get('高度'),kwargs.get('种子'),kwargs.get('步数'),kwargs.get('引导'),kwargs.get('采样器'),kwargs.get('调度器'),kwargs.get('参考图'),kwargs.get('Image2配置'))
+        return _cache_key('prompt-only-v3',kwargs.get('提示词',''),kwargs.get('生成路线'),kwargs.get('宽度'),kwargs.get('高度'),kwargs.get('种子'),kwargs.get('步数'),kwargs.get('引导'),kwargs.get('采样器'),kwargs.get('调度器'),kwargs.get('Image2配置'))
     @classmethod
     def INPUT_TYPES(cls):
         return {'required':{'提示词':('STRING',{'multiline':True}),
@@ -165,18 +226,17 @@ class CodexImageGenerate:
             from .image_bridge import normalize_settings
             cfg=normalize_settings(Image2配置)
             model_names=[('unet_gguf' if cfg['model'].endswith('.gguf') else 'diffusion_models',cfg['model']),('text_encoders',cfg['clip']),('vae',cfg['vae'])]
-        key=_cache_key('generate-v2',提示词,生成路线,宽度,高度,种子,步数,引导,采样器,调度器,参考图,Image2配置,_model_stamps(model_names))
+        key=_cache_key('generate-prompt-only-v3',提示词,生成路线,宽度,高度,种子,步数,引导,采样器,调度器,Image2配置,_model_stamps(model_names))
         cached=_cached_image(key)
         if cached:return (load_tensor(cached),)
         if 生成路线=='Image2.1':
             from .image_bridge import generate_reference,normalize_settings
-            config=normalize_settings(Image2配置);config.update(steps=步数,cfg=引导,sampler=采样器,scheduler=调度器)
-            p=tensor_path(参考图) if 参考图 is not None else None
-            try:
-                result=generate_reference(提示词,str(p) if p else None,宽度,高度,seed=种子,settings=config,text_only=p is None)
-                image=load_tensor(result);return (load_tensor(_save_cached(image,key)),)
-            finally:
-                if p:p.unlink(missing_ok=True)
+            config=normalize_settings(Image2配置);config.update(steps=步数,cfg=引导,sampler=采样器,scheduler=调度器,denoise=1.0)
+            # This dedicated reverse-prompt generator is text-to-image. Reference
+            # pixels belong to description/canvas sizing, never edit conditioning.
+            result=generate_reference(提示词,None,宽度,高度,seed=种子,settings=config,
+                                      text_only=True,init_from_reference=False)
+            image=load_tensor(result);return (load_tensor(_save_cached(image,key)),)
         handles={}
         try:
             handles['model']=nodes.UNETLoader().load_unet('z_image_turbo_bf16.safetensors','default')[0]
@@ -290,9 +350,9 @@ class CodexImageOutput:
         return {'required':{'图像':('IMAGE',),'输出模式':(['预览（不保存）','保存并预览'],{'default':'保存并预览'}),
                             '文件名前缀':('STRING',{'default':'Codex/生成结果'})},
                 'optional':{'格式':(['png','jpg','webp'],{'default':'png'}),'压缩质量':('INT',{'default':95,'min':1,'max':100})},
-                'hidden':{'prompt':'PROMPT','extra_pnginfo':'EXTRA_PNGINFO'}}
+                'hidden':{'prompt':'PROMPT','extra_pnginfo':'EXTRA_PNGINFO','unique_id':'UNIQUE_ID'}}
     RETURN_TYPES=('IMAGE','STRING');RETURN_NAMES=('图像','输出报告');FUNCTION='execute';OUTPUT_NODE=True;CATEGORY='Codex/输出'
-    def execute(self,图像,输出模式='保存并预览',文件名前缀='Codex/生成结果',格式='png',压缩质量=95,prompt=None,extra_pnginfo=None):
+    def execute(self,图像,输出模式='保存并预览',文件名前缀='Codex/生成结果',格式='png',压缩质量=95,prompt=None,extra_pnginfo=None,unique_id=None):
         if 图像 is None or getattr(图像,'ndim',0)!=4:raise ValueError('输出节点需要IMAGE。')
         import folder_paths
         import time
@@ -303,6 +363,8 @@ class CodexImageOutput:
         if not args.disable_metadata:
             if prompt is not None:metadata['prompt']=prompt
             if extra_pnginfo is not None:metadata.update(extra_pnginfo)
+            from .output_metadata import enrich_prompt_metadata
+            enrich_prompt_metadata(prompt, metadata, unique_id)
         if 输出模式 not in ('预览（不保存）','保存并预览') or 格式 not in ('png','jpg','webp'):raise ValueError('请选择有效的输出模式及格式。')
         target_root=(Path(folder_paths.get_output_directory()) if 输出模式=='保存并预览' else Path(folder_paths.get_temp_directory())).resolve()
         target_root.mkdir(parents=True,exist_ok=True)
@@ -326,7 +388,7 @@ class CodexImageOutput:
             elif metadata and 格式=='webp':
                 # ComfyUI reads WebP's ASCII EXIF entries as "key:JSON".
                 exif=Image.Exif()
-                keys=[key for key in ('prompt','workflow') if key in metadata]
+                keys=[key for key in ('prompt','workflow','codex_prompts') if key in metadata]
                 keys.extend(key for key in metadata if key not in keys)
                 for tag,key in zip((0x010F,0x0110,0x0131),keys):
                     value=metadata[key]
@@ -412,8 +474,9 @@ class CodexMossImageLora(CodexQwenImageLora):
         except ValueError as exc:raise ValueError('此文件无法应用到当前MOSS-Image模型；请确认LoRA基座和版本。') from exc
 
 
-NODE_CLASS_MAPPINGS={cls.__name__:cls for cls in (CodexImageCanvas,CodexReferenceDescribe,CodexImageGenerate,CodexImageRepair,CodexImageUpscale,CodexWorkflowControls,CodexImageOutput,CodexQwenImageLora,CodexKreaImageLora,CodexMossImageLora)}
+NODE_CLASS_MAPPINGS={cls.__name__:cls for cls in (CodexImageCanvas,CodexReferenceDescribe,CodexJoyCaptionDescribe,CodexReversePromptSave,CodexImageGenerate,CodexImageRepair,CodexImageUpscale,CodexWorkflowControls,CodexImageOutput,CodexQwenImageLora,CodexKreaImageLora,CodexMossImageLora)}
 NODE_DISPLAY_NAME_MAPPINGS={'CodexImageCanvas':'比例与尺寸 · 跟随参考图','CodexReferenceDescribe':'视觉反推 · 可见事实与修改','CodexImageGenerate':'生成模型 · Z-Image / Image2.1','CodexImageRepair':'可选修复 · 保持身份与衣物','CodexImageUpscale':'超分 · SeedVR2 / VOSR2 / DLSS5'}
+NODE_DISPLAY_NAME_MAPPINGS.update({'CodexJoyCaptionDescribe':'视觉反推 · JoyCaption','CodexReversePromptSave':'保存反推提示词 · 手动词直通'})
 NODE_DISPLAY_NAME_MAPPINGS['CodexWorkflowControls']='统一控制 · 与各阶段同步'
 NODE_DISPLAY_NAME_MAPPINGS['CodexImageOutput']='输出模式 · 预览 / 保存并预览'
 NODE_DISPLAY_NAME_MAPPINGS['CodexQwenImageLora']='Qwen Image 2.1 LoRA · 可选实验'

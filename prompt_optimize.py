@@ -159,28 +159,56 @@ class CodexPromptOptimize:
     def INPUT_TYPES(cls):
         from .prompt_nodes import local_models
         models=[name for name in local_models() if 'qwen' in name.lower()]
-        return {'required':{'原始提示词':('STRING',{'default':'','multiline':True}),
+        return {'required':{'原始提示词':('STRING',{'default':'','multiline':True,'lazy':True}),
             '启用优化':('BOOLEAN',{'default':False}),
             '目标模型':(['Z-Image Turbo','Image2.1','GPT Image 2/2.5','Krea-2 Turbo','MOSS-Image'],{'default':'Image2.1'}),
             '语言模型':(models or ['未安装千问模型'],),
-            '前置规则':('STRING',{'default':DEFAULT_RULES,'multiline':True}),
+            '前置规则':('STRING',{'default':DEFAULT_RULES,'multiline':True,'lazy':True}),
             '输出上限':('INT',{'default':1536,'min':128,'max':8192,'display_name':'输出上限（token）','tooltip':'这是最多生成的token数，不是字数或字节数；1536是上限，不要求每次写满。复杂原稿可提高到8192，并相应提高上下文。'}),
             '上下文':('INT',{'default':8192,'min':4096,'max':65536,'step':1024}),
             '温度':('FLOAT',{'default':0.15,'min':0,'max':1,'step':0.05}),
             'top_p':('FLOAT',{'default':0.9,'min':0.1,'max':1,'step':0.05})},
             'optional':{'详细程度':('INT',{'default':3,'min':1,'max':5,'step':1,'display':'slider'}),
                         '输出语言':(list(OUTPUT_LANGUAGES),{'default':'跟随输入','tooltip':'跟随输入时中文原稿默认中文；也可明确选择中文或英文。图中文字与LoRA触发词保持原样。'}),
-                        '种子':('INT',{'default':42,'min':0,'max':2**32-1,'tooltip':'控制本机提示词优化的随机性；0也是固定种子，相同种子和输入可复用缓存。'})}}
+                        '种子':('INT',{'default':42,'min':0,'max':2**32-1,'tooltip':'控制本机提示词优化的随机性；0也是固定种子，相同种子和输入可复用缓存。'}),
+                        '固定优化结果':('BOOLEAN',{'default':False}),
+                        '固定优化文本':('STRING',{'default':'','multiline':True}),
+                        '固定原始文本':('STRING',{'default':'','multiline':True})},
+                'hidden':{'prompt':'PROMPT','unique_id':'UNIQUE_ID'}}
     RETURN_TYPES=('STRING',)
     RETURN_NAMES=('最终生图提示词',)
     FUNCTION='optimize'
     CATEGORY='Codex/图像工具'
 
-    def optimize(self,原始提示词,启用优化=False,目标模型='Image2.1',语言模型='',前置规则=DEFAULT_RULES,
-                 输出上限=1536,上下文=8192,温度=.15,top_p=.9,详细程度=3,输出语言='跟随输入',种子=42):
+    def check_lazy_status(self, **kwargs):
+        if kwargs.get('固定优化结果'):
+            return []
+        required=['原始提示词']
+        if kwargs.get('启用优化'):
+            required.append('前置规则')
+        return [name for name in required if name in kwargs and kwargs[name] is None]
+
+    def optimize(self,原始提示词=None,启用优化=False,目标模型='Image2.1',语言模型='',前置规则=DEFAULT_RULES,
+                 输出上限=1536,上下文=8192,温度=.15,top_p=.9,详细程度=3,输出语言='跟随输入',种子=42,
+                 固定优化结果=False,固定优化文本='',固定原始文本='',prompt=None,unique_id=None):
+        def finish(text,stats):
+            from .output_metadata import remember_prompt_result
+            source=固定原始文本 if 固定优化结果 else 原始提示词 or ''
+            recorded_source=remember_prompt_result(prompt,unique_id,source,text,optimized=bool(stats.get('optimized')))
+            result=_prompt_result(text,stats)
+            result['ui']['codex_prompt_source']=[recorded_source if isinstance(recorded_source,str) else source]
+            return result
+        if 固定优化结果:
+            if not isinstance(固定优化文本,str) or not 固定优化文本.strip():
+                raise ValueError('尚无可固定的优化结果，请先完成一次提示词优化。')
+            text=固定优化文本
+            stats={**_prompt_stats(text,output_language(text),cached=True),
+                   'optimized':True,'frozen':True,'model_load_ns':0,'prompt_eval_ns':0,'output_eval_ns':0}
+            return finish(text,stats)
+        原始提示词='' if 原始提示词 is None else 原始提示词
         if type(种子) is not int or not 0<=种子<=2**32-1:raise ValueError('提示词优化种子应为0～4294967295的整数。')
         language=output_language(原始提示词,输出语言)
-        if not 启用优化:return _prompt_result(原始提示词,{**_prompt_stats(原始提示词,language),'seed':种子})
+        if not 启用优化:return finish(原始提示词,{**_prompt_stats(原始提示词,language),'seed':种子,'optimized':False,'frozen':False})
         if not 原始提示词.strip():raise ValueError('请填写原始提示词。')
         _validate_budget(输出上限,上下文)
         system=optimization_system(目标模型,前置规则,详细程度,language)
@@ -198,8 +226,9 @@ class CodexPromptOptimize:
             saved=json.loads(cached.read_text(encoding='utf-8'));text=saved.get('text')
             if isinstance(text,str) and text.strip() and not language_mismatch(text,language,原始提示词):
                 stats=saved.get('stats') if isinstance(saved.get('stats'),dict) else _prompt_stats(text,language)
-                stats={**stats,'cached':True,'truncated':False,'language':language,'seed':种子}
-                return _prompt_result(preserve_image_slots(原始提示词,text),stats)
+                stats={**stats,'cached':True,'truncated':False,'language':language,'seed':种子,
+                       'optimized':True,'frozen':False,'model_load_ns':0,'prompt_eval_ns':0,'output_eval_ns':0}
+                return finish(preserve_image_slots(原始提示词,text),stats)
         release_resources(full=True)
         client=LocalOllama()
         try:
@@ -226,11 +255,11 @@ class CodexPromptOptimize:
                     text=final_prompt(response.get('message',{}).get('content',''),目标模型)
                     if language_mismatch(text,language,原始提示词):raise ValueError(f'本机语言模型两次未遵守{language}输出要求，未将错误语言的正文传给生图。请检查前置规则或明确选择输出语言后重试。')
                 text=preserve_image_slots(原始提示词,text)
-                stats={**_prompt_stats(text,language,response),'seed':种子,'correction_passes':correction_passes}
+                stats={**_prompt_stats(text,language,response),'seed':种子,'correction_passes':correction_passes,'optimized':True,'frozen':False}
                 directory.mkdir(parents=True,exist_ok=True)
                 temp=directory/(key+'.'+uuid.uuid4().hex+'.tmp')
                 temp.write_text(json.dumps({'text':text,'stats':stats},ensure_ascii=False),encoding='utf-8');temp.replace(cached)
-                return _prompt_result(text,stats)
+                return finish(text,stats)
             finally:client.unload(语言模型)
         finally:client.close_owned()
 

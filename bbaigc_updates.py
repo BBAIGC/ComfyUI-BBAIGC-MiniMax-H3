@@ -50,6 +50,22 @@ def _manifest(identity, refresh=False):
 def _workflow_root():
     return Path(folder_paths.get_user_directory()) / 'default' / 'workflows' / 'BBAIGC'
 
+def _workflow_target(identity):
+    target = _workflow_root() / (identity + '.json')
+    if identity != 'h3':
+        return target
+    root = _workflow_root().parent
+    name = '小陈H3多分镜工作台_Codex.json'
+    preferred = root / '麻瓜迪迪-MiniMaxH3' / '提示词优化与多分镜' / name
+    if preferred.is_file():
+        return preferred
+    matches = list(root.rglob(name)) if root.is_dir() else []
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError('存在多个H3固定入口，请先明确要更新的工作流，未新增副本。')
+    return target
+
 def _installed():
     for path in (_registry_path(), Path(__file__).parent / 'installed_versions.json'):
         try:
@@ -65,7 +81,7 @@ def _registry_path():
     return Path(folder_paths.get_user_directory()) / 'default' / 'bbaigc' / 'installed_versions.json'
 
 def _local_workflow_version(identity):
-    target = _workflow_root() / (identity + '.json')
+    target = _workflow_target(identity)
     recorded = None
     if target.is_file():
         recorded = _installed().get(identity)
@@ -145,7 +161,7 @@ def install(identity):
     workflow = json.loads(payload)
     if not isinstance(workflow.get('nodes'), list) or not isinstance(workflow.get('links'), list):
         raise ValueError('工作流结构无效')
-    target = _workflow_root() / (identity + '.json')
+    target = _workflow_target(identity)
     registry = _registry_path()
     token = uuid.uuid4().hex
     temporary = target.with_name(target.name + '.' + token + '.tmp')

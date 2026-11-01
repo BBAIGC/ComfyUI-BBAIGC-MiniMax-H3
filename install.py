@@ -168,6 +168,34 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
+def patch_gguf(target, backup_root):
+    """Apply only the two verified Qwen2.1 compatibility expressions."""
+    path = target / 'loader.py'
+    text = path.read_text(encoding='utf-8')
+    original = text
+    import re
+    match = re.search(r'IMG_ARCH_LIST\s*=\s*\{([^\n]+)\}', text)
+    if not match:
+        raise ValueError('GGUF架构列表已变化，请先核对Qwen2.1兼容性，未覆盖上游文件。')
+    if 'qwen_image21' not in match.group(0):
+        text = text[:match.end() - 1] + ', "qwen_image21"' + text[match.end() - 1:]
+    old = 'if len(shape) <= 1 and tensor.tensor_type == gguf.GGMLQuantizationType.BF16:'
+    fixed = 'if len(shape) <= 1 and is_quantized(state_dict[sd_key]):'
+    if old in text:
+        text = text.replace(old, fixed)
+    elif fixed not in text:
+        anchor = '        state_dict[sd_key] = GGMLTensor(torch_tensor, tensor_type=tensor.tensor_type, tensor_shape=shape)'
+        if text.count(anchor) != 1:
+            raise ValueError('GGUF张量加载实现已变化，未自动重写，请核对当前上游支持。')
+        text = text.replace(anchor, anchor + '\n        ' + fixed + '\n            state_dict[sd_key] = dequantize_tensor(state_dict[sd_key], dtype=torch.float32)')
+    if 'from .dequant import is_quantized' not in text:
+        raise ValueError('GGUF反量化接口已变化，未覆盖文件。')
+    if text != original:
+        backup = backup_root / 'loader.py'
+        backup.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(path, backup)
+        path.write_text(text, encoding='utf-8')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--comfy-root', required=True, type=Path, help='含 folder_paths.py 的核心目录')
@@ -216,7 +244,9 @@ def main():
     packages = [checkout(url, existing_package(custom, url, (REPOS['h3'], 'ComfyUI-H3-PromptDirector'), ('from .studio_nodes import',)))]
     if identity in ('image', 'h3'):
         url = 'https://github.com/city96/ComfyUI-GGUF'
-        packages.append(checkout(url, existing_package(custom, url, ('ComfyUI-GGUF',))))
+        gguf_path = checkout(url, existing_package(custom, url, ('ComfyUI-GGUF',)))
+        patch_gguf(gguf_path, base / '.bbaigc-install' / 'gguf-compat-backup')
+        packages.append(gguf_path)
     if identity in ('image', 'bbapi'):
         url = 'https://github.com/BBAIGC/' + REPOS['bbapi']
         packages.append(checkout(url, existing_package(custom, url, (REPOS['bbapi'], 'ComfyUI-BBAPI-Private'))))
