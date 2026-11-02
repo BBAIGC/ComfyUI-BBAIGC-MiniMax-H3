@@ -4,7 +4,7 @@ const el=(tag,text='')=>{const item=document.createElement(tag);item.textContent
 const field=(owner,name)=>owner?.widgets?.find(item=>item.name===name);
 const put=(owner,name,value)=>{const item=field(owner,name);if(!item)return false;item.value=value;item.callback?.(value);owner.graph?.setDirtyCanvas?.(true,true);return true;};
 
-export function createModelServices({source,isBusy,onChange,signal,choices,kinds=[['text','语言','模型'],['image','图片','图像模型']]}){
+export function createModelServices({source,isBusy,onChange,onLocalModelChange,signal,choices,kinds=[['text','语言','模型'],['image','图片','图像模型']]}){
  const element=el('section'),heading=el('strong','模型与 API');heading.hidden=kinds.length===1;element.append(heading);element.className='h3-service-panel';
  let alive=true;signal?.addEventListener('abort',()=>{alive=false;for(const input of element.querySelectorAll('input[type=password]'))input.value='';});
  const refreshers=[];
@@ -18,7 +18,7 @@ export function createModelServices({source,isBusy,onChange,signal,choices,kinds
   const update=(name,value)=>{const owner=source(kind,true);if(!put(owner,name,value))throw Error('模型配置控件未就绪，请刷新工作流。');onChange(kind);};
   const identity=()=>JSON.stringify([field(source(kind),'API配置名称')?.value||'bbapi-main',field(source(kind),'API接口地址')?.value||'https://bbapi.ainivox.cn']);
   configure.onclick=()=>{source(kind,true);showConfig=true;details.hidden=false;details.open=true;sync();};
-  route.onchange=()=>{update('服务来源',route.value);sync();};local.onchange=()=>update(localName,local.value);
+  route.onchange=()=>{update('服务来源',route.value);sync();};local.onchange=()=>{if(onLocalModelChange?.(kind,local.value)!==true)update(localName,local.value);};
   for(const[control,name]of [[profile,'API配置名称'],[address,'API接口地址']])control.onchange=()=>{update(name,control.value.trim());sync();};
   models.onchange=()=>{manualMode=models.value==='__manual__';manual.hidden=!manualMode;if(manualMode){manual.focus();}else{update('API模型',models.value);sync();}};
   manual.onchange=()=>{update('API模型',manual.value.trim());modelSignature='';sync();};

@@ -1364,6 +1364,7 @@ class H3StoryboardStudio:
                                               "文本编码器", "视频VAE", "音频VAE", "低显存", "稀疏注意力", "4步LoRA", "8步LoRA", "视频采样器", "视频调度器", "视频LoRA", "PikaLoRA", "_video_postprocess")}}
         node_id = manifest['node_id']
         bundle = last_frame = selected = video = first = end_frame = None
+        image_model_session = None
         active_image_job = None
         timings = _TimingTracker(manifest)
         timings.start_stage("total")
@@ -1623,6 +1624,12 @@ class H3StoryboardStudio:
             if mode == "AI生成分镜" or mode in TAIL_SEQUENCE_MODES and tail_mode == "Image2.1修复":
                 from .image_bridge import validate_image_backend
                 validate_image_backend(settings=image_settings)
+            if (mode == "AI生成分镜" and not text_only and
+                    image_settings.get('provider') != 'bbapi' and not reference_upscale['enabled']):
+                from .image_model_session import ImageModelSession
+                clear_bundle_cache()
+                release_resources(full=False)
+                image_model_session = ImageModelSession()
 
             # Finish all independent first frames before loading H3. This avoids
             # retaining both image and video models throughout an AI storyboard.
@@ -1644,8 +1651,9 @@ class H3StoryboardStudio:
                 image_path = _revision_path(run_dir, f"首帧_{i + 1:03d}.png", manifest)
                 if mode == "AI生成分镜":
                     from .image_bridge import generate_reference
-                    clear_bundle_cache()
-                    release_resources(full=False)
+                    if image_model_session is None:
+                        clear_bundle_cache()
+                        release_resources(full=False)
                     generated = scene.get("generated_image_path")
                     if not generated or not Path(generated).is_file():
                         previous_image = (manifest["scenes"][i - 1].get("generated_image_path") or
@@ -1661,6 +1669,7 @@ class H3StoryboardStudio:
                                                        reference_paths=context["paths"], reference_roles=context["roles"],
                                                        settings=image_settings,
                                                        storyboard=True,
+                                                       model_session=image_model_session,
                                                        progress_callback=_image_job_progress(manifest, node_id, active_image_job))
                         scene["generated_image_path"] = generated
                         _store(manifest)
@@ -1691,8 +1700,9 @@ class H3StoryboardStudio:
                     timings.start_stage("images")
                     timings.start_image(manifest, active_image_job)
                     from .image_bridge import generate_reference
-                    clear_bundle_cache()
-                    release_resources(full=False)
+                    if image_model_session is None:
+                        clear_bundle_cache()
+                        release_resources(full=False)
                     _emit(manifest, node_id, "end_image", len(durations))
                     final_prompt = plan.get("final_image_prompt")
                     if final_prompt:
@@ -1714,6 +1724,7 @@ class H3StoryboardStudio:
                                                        reference_paths=context["paths"], reference_roles=context["roles"],
                                                        settings=image_settings,
                                                        storyboard=True,
+                                                       model_session=image_model_session,
                                                        progress_callback=_image_job_progress(manifest, node_id, active_image_job))
                         manifest["final_generated_image_path"] = generated
                         _store(manifest)
@@ -1758,6 +1769,9 @@ class H3StoryboardStudio:
                 timings.finish_stage("images")
                 _emit(manifest, node_id, "images_ready")
 
+            if image_model_session is not None:
+                image_model_session.close()
+                image_model_session = None
             timings.finish_stage("images")
             if regeneration_requested:
                 manifest["regeneration_applied"] = True
@@ -1924,6 +1938,9 @@ class H3StoryboardStudio:
             _emit(manifest, node_id, manifest["status"], manifest.get("scene_index", 0))
             raise
         finally:
+            if image_model_session is not None:
+                image_model_session.close()
+                image_model_session = None
             timings.finish_all({"prepared": "pending", "plannedready": "pending", "manual_waiting": "pending", "completed": "completed", "cancelled": "cancelled",
                                 "failed": "failed"}.get(manifest["status"], "failed"))
             bundle = selected = last_frame = video = anchor = first = end_frame = None

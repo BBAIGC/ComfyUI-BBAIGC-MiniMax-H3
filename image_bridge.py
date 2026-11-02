@@ -1,8 +1,8 @@
 """Installed Qwen-Image 2.1 GGUF image-edit chain for storyboard stills.
 
 Uses the same real loaders, encoder, prefix cache and sampler as the user's
-Qwen2.1 workflow. Never downloads weights. All weights are dropped after each
-image; the H3 caller must release its own bundle before entering this helper.
+Qwen2.1 workflow. Never downloads weights. Standalone calls drop every weight;
+storyboard callers may own one bounded image-stage weight session.
 """
 from __future__ import annotations
 
@@ -350,9 +350,21 @@ def _sampling_progress(callback):
             utils.PROGRESS_BAR_HOOK = original
 
 
+def _load_model_weights(settings):
+    if settings["model"].lower().endswith(".gguf"):
+        model = _class("UnetLoaderGGUF")().load_unet(settings["model"])[0]
+    else:
+        model = nodes.UNETLoader().load_unet(settings["model"], "default")[0]
+    for slot in settings["loras"]:
+        model = nodes.LoraLoaderModelOnly().load_lora_model_only(model, slot["name"], slot["strength"])[0]
+    clip = nodes.CLIPLoader().load_clip(settings["clip"], "qwen_image", settings["clip_device"])[0]
+    vae = nodes.VAELoader().load_vae(settings["vae"])[0]
+    return {"model": model, "clip": clip, "vae": vae}
+
+
 def generate_reference(prompt, reference_path, width, height, seed=42, reference_paths=None, settings=None,
                        progress_callback=None, reference_roles=None, storyboard=False, text_only=False,
-                       init_from_reference=False, negative_prompt=''):
+                       init_from_reference=False, negative_prompt='', model_session=None):
     """Return a saved still path; reference 1 anchors identity/appearance.
 
 Additional references stay independent and are capped at the installed
@@ -395,17 +407,10 @@ encoder's 16-image maximum. H3 consumes the resulting one first frame.
     try:
         mm.throw_exception_if_processing_interrupted()
         _notify_progress(progress_callback, "loading")
-        if settings["model"].lower().endswith(".gguf"):
-            handles["model"] = _class("UnetLoaderGGUF")().load_unet(settings["model"])[0]
-        else:
-            handles["model"] = nodes.UNETLoader().load_unet(settings["model"], "default")[0]
-        for slot in settings["loras"]:
-            handles["model"] = nodes.LoraLoaderModelOnly().load_lora_model_only(
-                handles["model"], slot["name"], slot["strength"])[0]
+        handles.update(_load_model_weights(settings) if model_session is None else
+                       model_session.acquire(settings, lambda: _load_model_weights(settings)))
         handles["model"] = _outputs(_class("QwenImage21Cache").execute(
             model=handles["model"], device=settings["cache_device"], dtype=settings["cache_dtype"]))[0]
-        handles["clip"] = nodes.CLIPLoader().load_clip(settings["clip"], "qwen_image", settings["clip_device"])[0]
-        handles["vae"] = nodes.VAELoader().load_vae(settings["vae"])[0]
         _notify_progress(progress_callback, "encoding")
         reference_edge = (settings["reference_long_edge"] if (storyboard or init_from_reference) and settings["reference_long_edge"] else
                           min(2048, max(1024, width, height)))
@@ -486,8 +491,11 @@ encoder's 16-image maximum. H3 consumes the resulting one first frame.
         _notify_progress(progress_callback, "completed")
         return str(output)
     finally:
-        # No model, reference batch, decoded tensor or prefix-cache clone is
-        # retained in this module or in ComfyUI's execution output cache.
+        # Only a caller-owned session may retain raw weights. References,
+        # conditioning, decoded tensors and per-image cache clones end here.
         pixels = None
         handles.clear()
-        release_resources(full=False)
+        if model_session is None:
+            release_resources(full=False)
+        else:
+            model_session.finish_image()

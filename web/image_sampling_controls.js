@@ -71,9 +71,9 @@ export function createImageSamplingControls({node, fields, modelChoices, onChang
         refresh();
     };
     const chooseModel = (version, requested) => {
-        if (disposed || updating) return;
+        if (disposed || updating) return false;
         const candidates = installed().filter(name => versionOf(name) === version);
-        if (!candidates.length) return;
+        if (!candidates.length) return false;
         capture();
         const saved = snapshots()[version];
         const model = candidates.includes(requested) ? requested : candidates.includes(saved?.model) ? saved.model :
@@ -89,6 +89,7 @@ export function createImageSamplingControls({node, fields, modelChoices, onChang
             } else set('model', model);
         } finally { updating = false; }
         changed();
+        return true;
     };
     const row = (label, key, control) => {
         const wrapper = element('label', 'bba-sampling-row');
@@ -174,7 +175,12 @@ export function createImageSamplingControls({node, fields, modelChoices, onChang
         }
     }
     refresh();
-    return {element: root, refresh, dispose() {
+    return {element: root, refresh, selectModel(name) {
+        // Only explicit user selections use version defaults/snapshots. Merely
+        // refreshing/restoring widgets continues to preserve their exact values.
+        if (typeof name !== 'string' || !installed().includes(name)) return false;
+        return chooseModel(versionOf(name), name);
+    }, dispose() {
         disposed = true;
         for (const control of [...controls.values(), ...versionButtons.values()]) { control.onchange = null; control.onclick = null; control.onkeydown = null; }
     }};
