@@ -7,12 +7,21 @@ _STATES=OrderedDict()
 _LOCK=threading.RLock()
 
 
-def remember(event,partial=False):
+def remember(event,partial=False,video_partial=False):
     run=event.get('run_id')
     if not run:return
     with _LOCK:
         previous=_STATES.get(run)
-        if partial:
+        if video_partial:
+            if not previous or previous.get('execution_id')!=event.get('execution_id'):return
+            previous['progress_seq']=event['progress_seq']
+            previous['video_progress']=copy.deepcopy(event['video_progress'])
+            for scene in previous.get('scenes',[]):
+                if scene.get('index')==event.get('scene_index'):
+                    scene['video_progress']=copy.deepcopy(event['video_progress'])
+                    break
+            _STATES[run]=previous
+        elif partial:
             if not previous or previous.get('execution_id')!=event.get('execution_id'):return
             jobs=previous.setdefault('image_jobs',[])
             index=next((i for i,row in enumerate(jobs) if row['id']==event['job']['id']),None)

@@ -9,8 +9,9 @@ import { createReferenceUpscalePanel } from "./reference_upscale.js";
 import {fileKind,decodeScript,downloadPlan,updateIdentity} from './plan_files.js';
 import {attachSpeechInput} from './speech_input.js';
 import {createImageSamplingControls} from './image_sampling_controls.js';
-import {createModelServices,createLoraSlots,createVideoFinishing} from './model_services.js';
+import {createModelServices,createLoraSlots,createVideoFinishing,openModelServiceDialog} from './model_services.js';
 import {restoreLegacyTextVideoWeights,videoModelSummary} from './video_model_selection.js';
+import {videoPhaseView} from './video_phase.js';
 import {rememberModelSchema,modelSchema,ensureModelWidgets,modelChoices} from './model_settings_compat.js';
 import {seedMode,setSeedMode,prepareH3Seed,currentH3Seed,setH3Seed,imageSeedMode,setImageSeedMode,currentH3ImageSeed,prepareH3ImageSeed,randomH3SceneSeed} from './h3_seed.js';
 
@@ -129,6 +130,7 @@ function installStyle() {
       .h3-studio .h3-scene-frame img,.h3-studio .h3-scene-frame video {width:100%;height:100%;object-fit:contain}
       .h3-studio .h3-scene-frame [hidden] {display:none}
       .h3-studio .h3-scene-cover {position:absolute;inset:0;display:flex;flex-direction:column;gap:9px;align-items:center;justify-content:center;padding:12px 10px 62px;background:#0005;color:#fff;font-size:13px;pointer-events:none}
+      .h3-studio .h3-scene-cover>.h3-spinner,.h3-studio .h3-video-phase>.h3-spinner{width:20px;height:20px;margin:0;flex:none}
       .h3-studio .h3-scene-play {position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:38px;height:38px;min-height:38px;padding:0;border-radius:50%;background:#222c;color:#fff;box-shadow:0 1px 5px #0006;z-index:2;font-size:18px}
       .h3-studio .h3-scene-play[data-playing=true] {opacity:0;transition:opacity 140ms ease}
       .h3-studio .h3-scene-frame:hover .h3-scene-play[data-playing=true],.h3-studio .h3-scene-play:focus-visible {opacity:1}
@@ -763,7 +765,7 @@ function setupStudio(node,nodeData) {
     let lastProgressFetch=0;
     let connectionSignature="";
     let connectionData=null;
-    let previewMode=node.properties?.h3_director_preview_mode==="single"?"single":"all";
+    let previewMode=node.properties?.h3_director_preview_preference==="single"?"single":"all";
     let activeLayout=node.properties?.h3_director_layout==="vertical"?"vertical":"horizontal";
     let failureLocationMounted=false;
     let previewFrameHeight=220;
@@ -1151,7 +1153,7 @@ function setupStudio(node,nodeData) {
     const previewBar = el("div", "h3-row");
     const previewViewBar=el("div","h3-row");const previewViewButtons=new Map();
     const previewModeSlider=el('div','h3-duration-mode'),previewModeIndicator=el('span','h3-duration-indicator');previewModeSlider.setAttribute('role','radiogroup');previewModeSlider.setAttribute('aria-label','预览范围');previewModeSlider.append(previewModeIndicator);previewViewBar.append(previewModeSlider);
-    for(const[kind,label]of[["single","单镜"],["all","全部分镜"]]){const button=el("button","h3-preview-mode",label);button.type="button";button.setAttribute('role','radio');button.onclick=()=>setPreviewMode(kind);previewViewButtons.set(kind,button);previewModeSlider.append(button);}
+    for(const[kind,label]of[["single","单镜"],["all","全部分镜"]]){const button=el("button","h3-preview-mode",label);button.type="button";button.setAttribute('role','radio');button.onclick=()=>{node.properties||={};node.properties.h3_director_preview_preference=kind;setPreviewMode(kind);node.graph?.setDirtyCanvas?.(true,true);};previewViewButtons.set(kind,button);previewModeSlider.append(button);}
     const previousButton = el("button", "", "上一镜");
     const nextButton = el("button", "", "下一镜");
     const sceneChooser = el("select", "h3-grow"); sceneChooser.setAttribute("aria-label", "选择预览镜头");
@@ -1181,7 +1183,7 @@ function setupStudio(node,nodeData) {
     endImage.ondblclick = () => {if (endImage.src && !endImage.hidden)openImageViewer(()=>[{id:"结束帧",url:endImage.src}],"结束帧");};
     const videoBox = el("div", "h3-preview");
     const video = el("video"); video.controls = true; video.preload = "metadata"; video.playsInline = true; video.hidden = true;
-    const videoPlaceholder = el("span", "h3-muted", "镜头视频"); videoBox.append(video, videoPlaceholder);
+    const videoPlaceholder = el("span", "h3-muted h3-video-phase", "镜头视频");videoPlaceholder.style.cssText='display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;text-align:center'; videoBox.append(video, videoPlaceholder);
     const singlePreview=el("div","h3-single-preview");singlePreview.append(imageBox,videoBox);
     const allScenes=el("div","h3-all-scenes");allScenes.setAttribute("aria-label","全部分镜预览");allScenes.hidden=true;
     allScenes.tabIndex=0;
@@ -1976,11 +1978,11 @@ function setupStudio(node,nodeData) {
         if (busy) progressState.append(el("span", "h3-spinner"));
         const planning=snapshot?.stage==='planning'&&snapshot?.planning_progress;
         const planningText=planning?`${planning.phase} · 已等待${Math.max(0,Math.floor(planning.elapsed_seconds||0))}秒${planning.output_fragments?` · 已返回${Math.floor(planning.output_fragments)}段`:''}`:null;
-        const text = snapshot ? `${planningText || STAGES[snapshot.stage] || STATUS[snapshot.status] || "处理中"}${snapshot.scene_index ? ` · 镜头${snapshot.scene_index} / ${sceneCount()}` : ""}${snapshot.error ? `：${snapshot.error}` : ""}` : "尚未开始";
+        const activePhase=videoPhaseView(sceneAt((snapshot?.scene_index||1)-1),snapshot,(snapshot?.scene_index||1)-1);
+        const text = snapshot ? `${planningText || (activePhase.busy?activePhase.text:null) || STAGES[snapshot.stage] || STATUS[snapshot.status] || "处理中"}${snapshot.scene_index ? ` · 镜头${snapshot.scene_index} / ${sceneCount()}` : ""}${snapshot.error ? `：${snapshot.error}` : ""}` : "尚未开始";
         progressState.append(document.createTextNode(text));
         if (!videoURL && scene) {
-            videoPlaceholder.textContent = STATUS[scene.status] || "等待生成";
-            if (scene.error) videoPlaceholder.textContent += `：${scene.error}`;
+            renderVideoPlaceholder(scene);
         }
         const overrides = readOverrides()[String(selected+1)] || {};
         if (editedScene !== selected || !promptDetails.contains(document.activeElement)) {
@@ -2141,7 +2143,7 @@ function setupStudio(node,nodeData) {
             view.picture.hidden=playing||!imageURL;view.waiting.hidden=playing||!!imageURL;view.waiting.textContent=url?"视频已完成":isTextVideo()?'等待视频生成':"等待分镜图";view.play.hidden=!url;
             if(playing)updateAllScenePlayback();else{view.play.textContent="▶";view.play.dataset.playing="false";view.play.setAttribute("aria-label",`播放镜头${index+1}视频`);view.play.title="播放视频";}
             const busy=["running","generating","生成中","准备图片","修复末帧"].includes(scene?.status)&&!url;
-            view.overlay.hidden=!busy;view.overlayText.textContent=status;
+            view.overlay.hidden=!busy;const phase=videoPhaseView(scene,snapshot,index);view.overlayText.textContent=phase.busy?phase.text:status;
             view.row.dataset.manual=String(imageEditingMode());view.row.dataset.manualSelected=String(imageEditingMode()&&selected===index);view.player.draggable=manual&&manualCanEdit()&&!!manualImage;
             view.inspect.textContent=manual?"选择图片":"查看/编辑";view.inspect.disabled=manual&&!manualCanEdit();view.replace.hidden=!(aiImageEditingMode()||textImageEditingMode());view.replace.disabled=!manualCanEdit();view.remove.hidden=!imageEditingMode()||!manualImage;view.remove.disabled=!manualCanEdit();
             if(manual&&!imageURL&&!url)view.waiting.textContent="点击选中 · 拖入 / 粘贴图片";
@@ -2152,7 +2154,26 @@ function setupStudio(node,nodeData) {
         scheduleWorkspaceFit();
         renderPlanReuse();
     }
+    function renderVideoPlaceholder(scene){
+        const phase=videoPhaseView(scene,snapshot,selected);
+        if(phase.busy){
+            if(videoPlaceholder.dataset.phaseBusy!=='true'){videoPlaceholder.replaceChildren(el('span','h3-spinner'),el('span','h3-video-phase-text'));videoPlaceholder.dataset.phaseBusy='true';}
+            videoPlaceholder.querySelector('.h3-video-phase-text').textContent=phase.text;
+        }else{delete videoPlaceholder.dataset.phaseBusy;videoPlaceholder.textContent=(STATUS[scene?.status]||'等待生成')+(scene?.error?`：${scene.error}`:'');}
+    }
+    function renderVideoPhaseDisplays(){
+        if(previewMode==='single'&&!sceneAt(selected)?.video)renderVideoPlaceholder(sceneAt(selected));
+        for(const[index,view]of allSceneRows){const scene=sceneAt(index),phase=videoPhaseView(scene,snapshot,index);if(phase.busy){view.overlay.hidden=false;view.overlayText.textContent=phase.text;}else if(scene?.video||!['生成中','running','generating','准备图片','修复末帧'].includes(scene?.status))view.overlay.hidden=true;}
+    }
+    function applyVideoProgress(data){
+        if(disposed||String(data?.node_id)!==String(node.id)||!snapshot||data.run_id!==currentRun||terminalRuns.has(data.run_id))return;
+        if(data.execution_id&&snapshot.execution_id&&data.execution_id!==snapshot.execution_id)return;
+        if(Number.isFinite(data.progress_seq)&&Number.isFinite(snapshot.progress_seq)&&data.progress_seq<snapshot.progress_seq)return;
+        const index=Number(data.scene_index)-1,scene=sceneAt(index);if(!scene||scene.video||snapshot.scene_index!==index+1)return;
+        snapshot.progress_seq=data.progress_seq;snapshot.video_progress={...data.video_progress};scene.video_progress={...data.video_progress};renderVideoPhaseDisplays();
+    }
     function renderTimings(){
+        renderVideoPhaseDisplays();
         const timings=snapshot?.timings||{};
         setTimingBadge(planningTime,"规划",timings.planning);setTimingBadge(imagesTotalTime,"生图",timings.images);
         setTimingBadge(currentVideoTime,"本镜",sceneAt(selected)?.video_timing);
@@ -2515,6 +2536,8 @@ function setupStudio(node,nodeData) {
     api.addEventListener("h3-director-progress",progressListener);
     const imageProgressListener=event=>applyImageProgress(event.detail);
     api.addEventListener("h3-director-image-progress",imageProgressListener);
+    const videoProgressListener=event=>applyVideoProgress(event.detail);
+    api.addEventListener('h3-director-video-progress',videoProgressListener);
     const coreListeners={
         execution_start:event=>{pendingExecutionStart=event.detail?.prompt_id||null;if(submissionArmed&&node.graph===app.graph)activePromptId=pendingExecutionStart;},
         executing:event=>{
@@ -2537,7 +2560,7 @@ function setupStudio(node,nodeData) {
         sync:syncFromWidgets,
         prepareReferences,prepareSeed,armExecution,
         connectionsChanged(){refreshModelConnections(true);},
-        restoreLayout(){applyLayout(node.properties?.h3_director_layout||"horizontal");if(node.properties?.h3_director_preview)applySnapshot(node.properties.h3_director_preview,true);setPreviewMode(node.properties?.h3_director_preview_mode||"all");recoverLiveProgress(true);},
+        restoreLayout(){applyLayout(node.properties?.h3_director_layout||"horizontal");if(node.properties?.h3_director_preview)applySnapshot(node.properties.h3_director_preview,true);setPreviewMode(node.properties?.h3_director_preview_preference==="single"?"single":"all");recoverLiveProgress(true);},
         receive(message) {
             let data = message?.h3_storyboard;
             if (Array.isArray(data)) data = data.at(-1);
@@ -2550,6 +2573,7 @@ function setupStudio(node,nodeData) {
             sceneResizeObserver.disconnect();
             workspaceResizeObserver.disconnect();
             api.removeEventListener("h3-director-image-progress",imageProgressListener);
+            api.removeEventListener('h3-director-video-progress',videoProgressListener);
             for(const[name,listener]of Object.entries(coreListeners))api.removeEventListener(name,listener);
             node.computeSize=originalComputeSize;node.onResize=originalOnResize;
             clearManualDrag();stopVideo(video); stopVideo(finalVideo);stopVideo(allSceneVideo);root.remove();delete node.h3ManualStoryboard; delete node._h3Studio;
@@ -2591,7 +2615,7 @@ app.registerExtension({
         if(CONFIG_TYPES.has(nodeData.name)||nodeData.name===TYPE)rememberModelSchema(nodeData);
         if(CONFIG_TYPES.has(nodeData.name)||nodeData.name===TYPE)installSettingsSerialization(nodeType,nodeData);
         if(CONFIG_TYPES.has(nodeData.name)){
-            const compact=node=>{ensureModelWidgets(node);const computed=node.computeSize?.();if(computed?.[1]>0)node.setSize([node.size?.[0]||computed[0],computed[1]]);colorH3Connections(app,node);};
+            const compact=node=>{ensureModelWidgets(node);if(nodeData.name!=='H3VideoModelSettings'&&!node.widgets?.some(widget=>widget.name==='API 配置与密钥')){const button=node.addWidget('button','API 配置与密钥',null,()=>openModelServiceDialog(nodeData.name==='H3TextModelSettings'?'text':'image',node,{isBusy:()=>!!app.runningNodeId}),{serialize:false});button.serialize=false;}const computed=node.computeSize?.();if(computed?.[1]>0)node.setSize([node.size?.[0]||computed[0],computed[1]]);colorH3Connections(app,node);};
             const created=nodeType.prototype.onNodeCreated;nodeType.prototype.onNodeCreated=function(){const result=created?.apply(this,arguments);compact(this);return result;};
             const configured=nodeType.prototype.onConfigure;nodeType.prototype.onConfigure=function(){const result=configured?.apply(this,arguments);ensureModelWidgets(this,arguments[0]);if(nodeData.name==="H3ImageModelSettings")restoreAddedWidgetValues(this,arguments[0],true);compact(this);return result;};
             return;

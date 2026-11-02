@@ -79,8 +79,10 @@ def refine_latent(bundle, positive, samples, seed, settings):
     if bundle.get("pika_enabled") or bundle.get("sampling_preset") == "Pika H3 Flex6":
         raise ValueError("Pika固定六步日程暂不支持二次采样，请关闭二采后重试。")
     started = time.perf_counter()
-    result = _sample(bundle["model"], positive, samples,
-                     steps=settings["refine_steps"], denoise=settings["refine_denoise"], seed=seed + 100003)
+    from .video_progress import sampling_video_progress
+    with sampling_video_progress(bundle, 'latent_refining', settings['refine_steps']):
+        result = _sample(bundle["model"], positive, samples,
+                         steps=settings["refine_steps"], denoise=settings["refine_denoise"], seed=seed + 100003)
     return result, {"enabled": True, "steps": settings["refine_steps"],
                     "denoise": settings["refine_denoise"], "seconds": round(time.perf_counter() - started, 3)}
 
@@ -97,6 +99,7 @@ def refine_faces(bundle, prompt, frames, seed, settings):
     from .face_refine_helpers.track import track_and_crop, _DETECTOR_CACHE
     from .face_refine_helpers.inject import inject_video_latent
     from .face_refine_helpers.stitch import stitch_faces, fade_stitch_at_seams
+    from .video_progress import notify_video_phase, sampling_video_progress
     started = time.perf_counter()
     canvas = settings["face_canvas"]
     pack = {"detector": settings["face_detector"], "confidence": settings["face_confidence"],
@@ -107,6 +110,7 @@ def refine_faces(bundle, prompt, frames, seed, settings):
     try:
         mm.throw_exception_if_processing_interrupted()
         base = frames.detach().cpu().float()
+        notify_video_phase(bundle, 'face_detection')
         crops, transform, note = track_and_crop(base, pack)
         if crops is None:
             return frames, {"enabled": True, "applied": False, "note": note,
@@ -115,16 +119,20 @@ def refine_faces(bundle, prompt, frames, seed, settings):
         generated_frames = max(5, math.ceil((n_frames - 5) / 17) * 17 + 5)
         if n_frames < generated_frames:
             crops = torch.cat((crops, crops[-1:].expand(generated_frames - n_frames, -1, -1, -1)))
+        notify_video_phase(bundle, 'face_encoding')
         positive, latent = _result(MiniMaxH3ImageToVideo.execute(
             clip=bundle["clip"], vae=bundle["vae"],
             prompt="同一人物脸部近景，保持原有身份、表情、朝向和说话动作。" + str(prompt),
             width=canvas, height=canvas, length=generated_frames, first_frame=crops[:1]))
         latent = inject_video_latent(latent, crops, bundle["vae"])
-        sampled = _sample(bundle["model"], positive, latent,
-                          steps=settings["face_steps"], denoise=settings["face_denoise"], seed=seed + 200003)
+        with sampling_video_progress(bundle, 'face_sampling', settings['face_steps']):
+            sampled = _sample(bundle["model"], positive, latent,
+                              steps=settings["face_steps"], denoise=settings["face_denoise"], seed=seed + 200003)
+        notify_video_phase(bundle, 'face_decoding')
         repaired = nodes.VAEDecode().decode(bundle["vae"], sampled)[0][:n_frames].detach().cpu().float()
         if len(repaired) != n_frames:
             raise RuntimeError("脸部修复帧数不足，原成片未被覆盖。")
+        notify_video_phase(bundle, 'face_stitching')
         stitched = stitch_faces(base, repaired, transform, pack)
         stitched = fade_stitch_at_seams(stitched, base, head_frames=6, tail_frames=6)
         return stitched, {"enabled": True, "applied": True, "note": note,

@@ -109,6 +109,7 @@ def refine_video_lora_slots(bundle, positive, latent, seed, sampler_name, schedu
     result = lambda output: output.result if hasattr(output, "result") else output
     receipts = []
     negative = None
+    from .video_progress import sampling_video_progress
     for index, slot in enumerate(profiles):
         mm.throw_exception_if_processing_interrupted()
         profile = sampling_profile(slot)
@@ -121,7 +122,8 @@ def refine_video_lora_slots(bundle, positive, latent, seed, sampler_name, schedu
         sigmas = result(BasicScheduler.execute(bundle["model"], scheduler, profile["steps"], .25))[0]
         noise = result(RandomNoise.execute(int(seed) + 300003 + index))[0]
         sampler = result(KSamplerSelect.execute(sampler_name))[0]
-        latent = result(SamplerCustomAdvanced.execute(noise, guider, sampler, sigmas, latent))[0]
+        with sampling_video_progress(bundle, 'lora_refining', profile['steps'], slot=index + 1):
+            latent = result(SamplerCustomAdvanced.execute(noise, guider, sampler, sigmas, latent))[0]
         receipts.append({"name": slot["name"], "steps": profile["steps"], "cfg": profile["cfg"],
                          "denoise": .25, "combined_loras": True})
     return latent, receipts

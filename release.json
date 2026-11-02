@@ -1,12 +1,12 @@
 {
   "id": "h3",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "author": "BBAIGC",
   "workflow": "workflows/BBAIGC_h3.json",
-  "sha256": "c67bf0e3492008e4a9961ce2c47e2326b1fbd8c77853d781c40a4c897ad1c6c5",
+  "sha256": "00d1a77a856a5ac9d48bd6ab380d969f501b88f34379773f59ce804ee740392d",
   "node_versions": {
-    "core": "1.3.1",
+    "core": "1.3.2",
     "bbapi": "1.1.6"
   },
-  "notes": "恢复 Comfy Desktop 侧栏 MCP 图标：为缺少 Iconify 样式的按钮提供 SVG mask；保留原按钮与连接功能，不修改第三方状态监控。"
+  "notes": "API配置入口常显，切API后自动读取已保存配置与模型；视频预览显示实际采样阶段和百分比；默认全部分镜并保留主动选择；去除规划数据泄漏与错误动作模板。"
 }

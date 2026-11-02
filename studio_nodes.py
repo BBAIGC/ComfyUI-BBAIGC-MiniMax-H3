@@ -486,6 +486,36 @@ def _image_job_complete(manifest, job_id, image, inserted=True):
     _image_summary(manifest)
 
 
+def _video_job_progress(manifest, node_id, scene, scene_index):
+    """Persist phase boundaries; keep native step events small and in replay memory."""
+    from server import PromptServer
+    from .progress_state import remember
+
+    def receive(data):
+        phase = data.get('phase')
+        if not isinstance(phase, str):
+            return
+        previous = scene.get('video_progress') or {}
+        changed = previous.get('phase') != phase or previous.get('slot') != data.get('slot')
+        progress = {'phase': phase, 'started_at': time.time() if changed else previous['started_at']}
+        for name in ('value', 'total', 'percent', 'slot'):
+            if name in data:
+                progress[name] = data[name]
+        scene['video_progress'] = manifest['video_progress'] = progress
+        if changed:
+            _emit(manifest, node_id, 'video', scene_index)
+            return
+        manifest['progress_seq'] = manifest.get('progress_seq', 0) + 1
+        event = {'node_id': str(node_id), 'run_id': manifest['run_id'],
+                 'execution_id': manifest.get('execution_id'), 'prompt_id': manifest.get('prompt_id'),
+                 'progress_seq': manifest['progress_seq'], 'scene_index': scene_index,
+                 'video_progress': dict(progress)}
+        remember(event, video_partial=True)
+        if PromptServer.instance is not None:
+            PromptServer.instance.send_sync('h3-director-video-progress', event)
+    return receive
+
+
 def _snapshot_event(manifest,node_id):
     event = {key: manifest.get(key) for key in
              ("run_id", "status", "stage", "scene_index", "scene_count", "mode", "final_video", "error", "failure_context", "optimized_script", "effective_settings", "image_jobs", "image_summary", "timings", "output_directory", "plan_available", "plan_reused", "revision", "regeneration_applied", "duration_mode", "timing_mode", "scene_seconds", "total_seconds", "allocation_receipt", "manual_missing", "image_edit_receipts")}
@@ -493,6 +523,9 @@ def _snapshot_event(manifest,node_id):
                  ("index", "status", "image", "end_image", "video", "prompt", "display_prompt", "image_prompt", "seconds", "error", "video_timing", "video_seed", "plan_fields", "reference_labels", "spoken_dialogues", "input_mode")}
                  for scene in manifest.get("scenes", [])])
     event['planning_progress'] = manifest.get('planning_progress')
+    event['video_progress'] = manifest.get('video_progress')
+    for item, scene in zip(event['scenes'], manifest.get('scenes', [])):
+        item['video_progress'] = scene.get('video_progress')
     event.update(execution_id=manifest.get('execution_id'),prompt_id=manifest.get('prompt_id'),progress_seq=manifest.get('progress_seq',0),updated_at=manifest.get('updated_at'))
     event['video_input'] = manifest.get('video_input', '文生视频' if manifest.get('mode') == '文生视频' else '图生视频')
     event['input_mode'] = 'T2VA' if event['video_input'] == '文生视频' else 'I2V'
@@ -1796,12 +1829,15 @@ class H3StoryboardStudio:
                 timings.start(scene["video_timing"])
                 scene["status"] = "生成中"
                 _emit(manifest, node_id, "video", i + 1)
+                video_progress = _video_job_progress(manifest, node_id, scene, i + 1)
+                video_progress({'phase': 'loading'})
                 selected_plan = {**plan, "seconds_per_scene": durations[i],
                                  "input_mode": scene.get("input_mode", input_mode)}
                 if bundle is None or bundle.get("input_mode", "I2V") != selected_plan["input_mode"]:
                     bundle = None
                     bundle = _bundle(selected_plan, kwargs)
                 selected = {**bundle, "ready_plan": json.dumps(selected_plan, ensure_ascii=False),
+                            "_progress_callback": video_progress,
                             "_voice_settings": kwargs.get("_voice_settings"), "_voice_scene": plan["scenes"][i],
                             "_dialogue_track": kwargs.get("_dialogue_track"),
                             "_video_postprocess": kwargs.get("_video_postprocess"),
@@ -1825,6 +1861,8 @@ class H3StoryboardStudio:
                 _save_image(last_frame, tail_path)
                 video = last_frame = selected = None
                 scene.update(status="完成", video_path=str(destination), video=_preview(destination), tail_path=str(tail_path), report=report)
+                scene.pop('video_progress', None)
+                manifest.pop('video_progress', None)
                 timings.finish(scene["video_timing"])
                 _emit(manifest, node_id, "video", i + 1)
                 gc.collect()

@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {videoPhaseView} from '../web/video_phase.js';
+const run={status:'running',scene_index:1};
+const scene={status:'生成中',video_progress:{phase:'sampling',started_at:100,value:8,total:8}};
+assert.equal(videoPhaseView(scene,run,0,105).text,'视频采样 · 8/8 · 100% · 5秒');
+scene.video_progress={phase:'face_sampling',started_at:106,value:4,total:8};
+assert.equal(videoPhaseView(scene,run,0,109).text,'脸部修复采样 · 4/8 · 50% · 3秒');
+scene.video_progress={phase:'video_decoding',started_at:110,value:8,total:8};
+assert.equal(videoPhaseView(scene,run,0,112).text,'解码视频画面 · 2秒');
+assert.equal(videoPhaseView({status:'等待'},run,1).busy,false);
+assert.equal(videoPhaseView({...scene,video:{filename:'done.mp4'}},run,0).busy,false);
+assert.equal(videoPhaseView(scene,{...run,status:'completed'},0).busy,false);
+console.log('PASS: actual sampler fraction, phase reset, waiting and completed preview states');

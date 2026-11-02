@@ -58,19 +58,25 @@ def finite_gesture_timing(action, raw_script, seconds):
     text = str(action)
     if float(seconds) < 3 or re.search(r"\d+(?:\.\d+)?\s*(?:秒|s\b)", text, re.I):
         return text
-    gesture = next((word for word in ('点头', '摇头', '挥手') if word in text), None)
-    place_cup = not gesture and '杯' in text and bool(re.search(r'放(?:到|在|稳|下|置)', text))
-    if not gesture and not place_cup:
+    gestures = [word for word in ('点头', '摇头', '挥手') if word in text]
+    if len(gestures) != 1:
+        return text
+    gesture = gestures[0]
+    if gesture not in str(raw_script):
+        return text
+    # A scene containing a gesture and another event must keep its own clock;
+    # do not compress hat removal, cup handover, etc. into a short-gesture slot.
+    if re.search(r'摘|脱|穿|拿起|端起|放下|放在|递|走|跑|跳|站起|坐下|打开|关上', text):
+        return text
+    if re.search(r'(?:第\s*\d+(?:\.\d+)?\s*秒|\d+(?:\.\d+)?\s*[-–至到～]\s*\d+(?:\.\d+)?\s*秒)'
+                 r'[^。；;\n]{0,20}' + re.escape(gesture), str(raw_script)):
         return text
     if gesture and re.search(r"(?:反复|重复|不停|持续|一直|多次|连续)[^。；;]{0,12}" + gesture +
             "|" + gesture + r"\s*(?:[两二三四五六七八九十\d]+次|不止)", str(raw_script)):
         return text
-    if place_cup and re.search(r'(?:反复|重复|多次|再次|重新)[^。；;]{0,16}放[^。；;]{0,12}杯', str(raw_script)):
-        return text
     finish = min(2.0, float(seconds)/3)
-    resting = ('杯子静置桌面，原先放杯者的双臂放松停在身侧，保持自然目光与呼吸' if place_cup else
-               '头部回到自然中立位置，目光放松，保持自然呼吸与眨眼' if gesture in ('点头', '摇头')
-               else '手臂自然落在身侧，目光放松，保持自然呼吸与眨眼')
+    resting = ('头部回到自然中立位置，目光放松，保持自然呼吸与眨眼' if gesture in ('点头', '摇头')
+               else '手臂自然回到原位，目光放松，保持自然呼吸与眨眼')
     return f"第0.5至{finish:g}秒：{text} 第{finish:g}至{float(seconds):g}秒：{resting}。"
 
 

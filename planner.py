@@ -435,8 +435,35 @@ def _facts_text(facts):
     return "；".join(f"{key}：{value}" for key, value in facts.items())
 
 
+def _without_planner_metadata(text):
+    """Remove planner bookkeeping labels while retaining adjacent scene limits."""
+    labels = (r"(?:场景|分镜|镜头)(?:数量|数)|(?:每镜|镜头)?时长|总计|总时长|"
+              r"参考\s*(?:ID|角色|编号)|语音模式|场景时间线|锚点|对白\s*(?:ID|编号)|"
+              r"scene_count|scene_seconds|total_seconds|reference_ids|reference_roles|"
+              r"speech_mode|audio_mode|scene_timeline|dialogue_ids")
+    value = re.sub(r"(?:" + labels + r")\s*[:：]\s*(?:\[[^\]]*\]|\{[^}]*\}|[^，,。；;\n]*)"
+                   r"\s*[，,；;]?\s*", "", str(text), flags=re.I)
+    # Some LLMs leave the last ID of a removed allocation array outside it.
+    value = re.sub(r"(?<![A-Za-z0-9])[DS][1-9]\d*\s*\]", "", value)
+    value = re.sub(r"[，,；;]\s*(?=[，,；;。]|$)", "", value)
+    return value.strip(" ，,；;。\n")
+
+
+def _without_untimed_speech(text):
+    """Speech performance belongs to the timed dialogue block, not action prose."""
+    value = re.sub(r"(?:同时|随后|并且|并|然后)?\s*(?:自然|轻轻|开始|继续)?\s*"
+                   r"(?:开口(?:说话|讲话|发言|交谈)?|说话|讲话|发言|交谈)", "", str(text))
+    value = re.sub(r"(?:嘴唇|下颌)(?:自然|轻轻|随之|持续|正在)*\s*(?:开合|张合|活动)", "", value)
+    value = re.sub(r"\b(?:begins?|starts?|continues?)\s+(?:to\s+)?(?:speak(?:ing)?|talk(?:ing)?)\b|"
+                   r"\b(?:speaks?|speaking|talks?|talking|opens?\s+(?:their|her|his)\s+mouth\s+to\s+speak)\b",
+                   "", value, flags=re.I)
+    value = re.sub(r"[，,；;]\s*(?=[，,；;。]|$)", "", value)
+    return value.strip(" ，,；;。\n")
+
+
 def _stable_continuity(text, *, constraints=False):
     """Keep identity/style limits without reissuing changing source events."""
+    text = _without_planner_metadata(text)
     if constraints:
         text = "".join(sentence for sentence in re.split(r"(?<=[。！？!?\n])", text)
                        if not re.search(r"第[一二三四五六七八九十百\d]+(?:镜|段|幕)|镜头\s*\d+|\b(?:shot|scene)\s*\d+", sentence, re.I))
@@ -677,8 +704,8 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
         raise ValueError("分镜全片索引范围无效。")
     continuous_take = is_continuous_take(script) and total_scene_count > 1
     offsets = _scene_start_offsets(seconds, timeline_offset, scene_start_offsets)
-    continuity = native_reference_prose(_sanitize_description_speech(_text(raw, "continuity", allow_empty=True)))
-    constraints = native_reference_prose(_sanitize_description_speech(_text(raw, "constraints", allow_empty=True)))
+    continuity = _without_planner_metadata(native_reference_prose(_sanitize_description_speech(_text(raw, "continuity", allow_empty=True))))
+    constraints = _without_planner_metadata(native_reference_prose(_sanitize_description_speech(_text(raw, "constraints", allow_empty=True))))
     expected = {item["id"]: item for item in dialogues}
     actor_names = {line["speaker"]: line["source_speaker"] for line in dialogues if line.get("source_speaker")}
     def identify_actors(text):
@@ -714,6 +741,8 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
                 preserve_performance=name in ("visual", "action"))
             if name != "image_prompt":
                 source[name] = native_reference_prose(source[name])
+            if name in ("visual", "action", "start_state", "end_state"):
+                source[name] = _without_untimed_speech(source[name])
             if has_environment and name in ("visual", "start_state", "end_state", "image_prompt"):
                 source[name] = sanitize_environment_text(source[name], end_environment if name == "end_state" else env_anchor)
                 if name == "image_prompt" and not text_only:
@@ -733,7 +762,7 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
             visual = _stable_continuity(visual)
         from .static_prompt import static_text
         opening = static_text(identify_actors(source.get('start_state', '')))
-        framing = static_text(identify_actors(source.get('composition', '')))
+        framing = static_text(identify_actors(_without_untimed_speech(source.get('composition', ''))))
         # One action paragraph only. The state and event ledgers are planning
         # metadata; listing the same gesture in visual/start/end/facts makes
         # the video model interpret it as several occurrences.
@@ -823,10 +852,13 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
             if not line["offscreen"] and re.search(r"lips? (?:remain|stay|are|is|kept)?\s*(?:completely |naturally )?closed|嘴唇.*闭", speaker + " " + delivery, re.I):
                 raise ValueError("规划把画面人物对白写成闭嘴状态，已停止生成。")
             words = f"<d>[{line['language']}] {line['text']}</d>"
+            # Free-form delivery is planning metadata. Some H3 variants speak
+            # it literally after the tagged utterance; keep it in the editable
+            # plan without appending it to the native speech instruction.
             if line["offscreen"]:
-                phrase = f"第{start:g}至{end:g}秒，{speaker}（{speaker_id}）以画外音说：{words}。{delivery}。"
+                phrase = f"第{start:g}至{end:g}秒，{speaker}（{speaker_id}）以画外音说：{words}。"
             else:
-                phrase = (f"第{start:g}至{end:g}秒，画面中可见的{speaker}（{speaker_id}）现场说：{words}。{delivery}。"
+                phrase = (f"第{start:g}至{end:g}秒，画面中可见的{speaker}（{speaker_id}）现场说：{words}。"
                           "说话人的嘴唇和下颌随着这些原话自然发音，表情与声音同步。"
                           "声音来自画面中的此人，不是画外旁白或背景人声。")
             speech.append(phrase)

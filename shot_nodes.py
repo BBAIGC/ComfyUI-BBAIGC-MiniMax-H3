@@ -356,12 +356,14 @@ class H3GenerateShot:
             target_last_frame = target_last_frame[:1].detach().to("cpu").contiguous()
 
         start = time.perf_counter()
+        from .video_progress import notify_video_phase, sampling_video_progress
         temporary_path = None
         guided_audio = None
         local = {}
         try:
             mm.throw_exception_if_processing_interrupted()
             with torch.inference_mode():
+                notify_video_phase(bundle, 'encoding')
                 from .voice_nodes import select_scene_voices, voice_conditioning
                 voices = [] if silent or using_dialogue else select_scene_voices(
                     bundle.get("_voice_settings"), plan, bundle.get("_voice_scene") or {})
@@ -398,7 +400,8 @@ class H3GenerateShot:
                 sigmas = _sampling_sigmas(bundle, scheduler, effective_steps)
                 noise = _outputs(RandomNoise.execute(int(seed)))[0]
                 sampler = _outputs(KSamplerSelect.execute(sampler_name))[0]
-                sampler_result = SamplerCustomAdvanced.execute(noise, guider, sampler, sigmas, latent)
+                with sampling_video_progress(bundle, 'sampling', effective_steps):
+                    sampler_result = SamplerCustomAdvanced.execute(noise, guider, sampler, sigmas, latent)
                 samples = _outputs(sampler_result)[0]
                 local.update(guider=guider, sigmas=sigmas, noise=noise,
                              sampler=sampler, sampler_result=sampler_result, samples=samples)
@@ -410,6 +413,7 @@ class H3GenerateShot:
                 samples, lora_refinement = refine_video_lora_slots(
                     bundle, positive, samples, int(seed), sampler_name, scheduler)
                 samples, latent_refine_receipt = refine_latent(bundle, positive, samples, int(seed), postprocess)
+                notify_video_phase(bundle, 'video_decoding')
                 frames = nodes.VAEDecode().decode(bundle["vae"], samples)[0]
                 frames = frames.detach().to(device="cpu", dtype=torch.float32)
                 if len(frames) < target_frames:
@@ -418,6 +422,7 @@ class H3GenerateShot:
                 frames = frames[:target_frames].contiguous()
                 frames, face_refine_receipt = refine_faces(bundle, str(prompt), frames, int(seed), postprocess)
                 last_frame = frames[-1:].clone()
+                notify_video_phase(bundle, 'audio_decoding')
                 raw_audio = None if silent or using_dialogue else _outputs(VAEDecodeAudio.execute(bundle["audio_vae"], original_samples))[0]
                 audio = _audio_for_export(guided_audio if using_dialogue else raw_audio, target_frames, silent)
                 local.update(frames=frames, raw_audio=raw_audio, audio=audio)
@@ -430,6 +435,7 @@ class H3GenerateShot:
                 destination = destination_dir / f"shot_{uuid.uuid4().hex}.mp4"
                 temporary_path = destination.with_suffix(".partial.mp4")
                 from .output_metadata import current_metadata
+                notify_video_phase(bundle, 'video_encoding')
                 unencoded.save_to(str(temporary_path), format=Types.VideoContainer.MP4,
                                   codec=Types.VideoCodec.H264, metadata=current_metadata())
                 mm.throw_exception_if_processing_interrupted()
