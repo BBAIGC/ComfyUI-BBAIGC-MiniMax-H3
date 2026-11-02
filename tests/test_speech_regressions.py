@@ -79,6 +79,26 @@ class SpeechRegressionTests(unittest.TestCase):
         self.assertNotIn('温和亲切，嘴唇自然开合', body)
         self.assertEqual(result['scenes'][0]['dialogues'][0]['delivery'], '温和亲切，嘴唇自然开合')
 
+    def test_planner_field_rules_survive_custom_presets(self):
+        system, _, schema = self.planner.planning_request('人物说“下午好。”', 1, [8],
+            self.planner.extract_dialogue('人物说“下午好。”'), '自动识别原稿')
+        self.assertIn('constraints只写原剧本', system)
+        self.assertIn('不能增加text或自拟台词', system)
+        self.assertFalse(schema['properties']['scenes']['items']['properties']['dialogues']['items']['additionalProperties'])
+
+    def test_final_renderer_cannot_add_an_utterance(self):
+        script = '人物坐在桌前，说“下午好。”'
+        lines = self.planner.extract_dialogue(script)
+        scene = {'visual': '客厅中景。', 'action': '人物坐着。', 'soundscape': '安静环境声。',
+            'music': 'N/A', 'start_state': '人物坐着。', 'end_state': '人物仍坐着。',
+            'composition': '平视中景。', 'dialogues': [{'id': 'D1', 'speaker_id': 'S1',
+                'speaker_description': '人物', 'delivery': '自然', 'start': 2, 'end': 4}]}
+        render = self.planner.render_h3_prompt
+        with patch.object(self.planner, 'render_h3_prompt', side_effect=lambda *a, **k: render(*a, **k) + '\n<d>[Chinese] 额外台词</d>'):
+            with self.assertRaisesRegex(ValueError, '已确认对白不同'):
+                self.planner.compile_storyboard({'continuity': '', 'constraints': '', 'scenes': [scene]},
+                    script=script, count=1, seconds=[8], dialogues=lines, voice_mode='自动识别原稿', input_mode='T2VA')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -66,6 +66,9 @@ _NEGATED_LEAD = re.compile(r"(?:不要|不许|禁止|不能|不必|没有|不得
 # Kept outside editable style presets: old projects retain their saved rules,
 # while source order, persistent state and exact-word speech remain contracts.
 _STORYBOARD_QUALITY_CONTRACT = """剧情与对白编排约定：
+字段边界：full_script、scene_count、scene_seconds、scene_timeline、voice_mode、参考ID、对白ID和JSON结构只用于规划，不能复制进任何画面、动作、声音、continuity或constraints描述。
+continuity只写画面中稳定的人物外观和场景；constraints只写原剧本要求保持或禁止改变的自然限制，不写数量、参数、时长、编号、锚点解释或执行说明；没有自然限制就留空。
+发声边界：dialogues只能引用提供的原句ID和说话人，不能增加text或自拟台词。visual/action/start_state/end_state/composition只写可见画面与动作，不写无指定台词的“开口说话”，也不转述台词。delivery只是独立的表演元数据，不是人物会念出的文案。
 先通读全片，再将事件和对白一起分配。对白原句不够每镜使用时，允许静默，优先让对白所在的剧情节点贯穿开头、中段与后段；
 不要将可舒展的对白全挤在前几镜，再把后面多镜写成相同姿态的长停顿。不可添加、改写、重复对白或把一句话拆成新台词。
 每条对白仍跟随其原稿触发动作和人物反应。原稿明确指定的时间、先后因果、安静段落和无对白结尾优先，不追求机械平均。
@@ -223,7 +226,8 @@ def planning_request(script, count, seconds, dialogues, voice_mode, timeline_off
     dialogue_ids = [item["id"] for item in dialogues]
     schema = {
         "type": "object", "properties": {
-            "continuity": {"type": "string"}, "constraints": {"type": "string"},
+            "continuity": {"type": "string", "description": "仅稳定可见的人物外观、场景和画面风格；不可回显请求参数或规划说明。"},
+            "constraints": {"type": "string", "description": "仅原稿要求的自然限制；不写场景数量、时长、ID、时间线、语音模式或锚点解释，无则空字符串。"},
             "environment_anchor": environment_schema(),
             "scenes": {"type": "array", "minItems": count, "maxItems": count, "items": {
                 "type": "object", "properties": {
@@ -249,7 +253,7 @@ def planning_request(script, count, seconds, dialogues, voice_mode, timeline_off
                     "dialogues": {"type": "array", "maxItems": len(dialogue_ids), "items": {"type": "object", "properties": {
                         "id": {"type": "string", **({"enum": dialogue_ids} if dialogue_ids else {})}, "speaker_id": {"type": "string", "pattern": "^S[1-9][0-9]*$"},
                         "speaker_description": {"type": "string"},
-                        "delivery": {"type": "string"},
+                        "delivery": {"type": "string", "description": "独立表演元数据，不是台词，不得加入会被人物念出的新内容。"},
                         "start": {"type": "number", "minimum": 0,
                                   "description": "本镜局部开始秒数，从0计时；全片时间须减去本镜global_start。"},
                         "end": {"type": "number", "minimum": 0,
@@ -876,8 +880,10 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
         fields = dict(zip(H3_FIELDS, (body, ambience, music)))
         fields = apply_motion_continuity(fields, script, scene_index_offset + index, total_scene_count)
         encoded = json.dumps(fields, ensure_ascii=False, indent=2)
+        prompt = render_h3_prompt(encoded, input_mode=input_mode, duration_seconds=seconds[index])
+        validate_prompt_dialogue(prompt, dialogues, assigned)
         compiled.append({"fields": fields, "json": encoded,
-                         "prompt": render_h3_prompt(encoded, input_mode=input_mode, duration_seconds=seconds[index])})
+                         "prompt": prompt})
         normalized.append({**source, "seconds": seconds[index]})
     if Counter(observed) != Counter(expected.keys()):
         raise ValueError("大模型漏掉、重复或关闭了原稿中的指定对白，已停止生成；可用“指定对白覆盖”纠正识别结果。")

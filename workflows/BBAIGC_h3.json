@@ -131,7 +131,7 @@
       "properties": {
         "Node name for S&R": "H3TextModelSettings",
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2"
+        "bbaigc_version": "1.3.3"
       },
       "widgets_values": [
         "qwen3.5:9b",
@@ -381,7 +381,7 @@
         "Node name for S&R": "H3ImageModelSettings",
         "h3_image_long_edge": 2048,
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2"
+        "bbaigc_version": "1.3.3"
       },
       "widgets_values": [
         "qwen-image-2.1-UC-Q6_K.gguf",
@@ -653,7 +653,7 @@
       "properties": {
         "Node name for S&R": "H3VideoModelSettings",
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2"
+        "bbaigc_version": "1.3.3"
       },
       "widgets_values": [
         "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
@@ -787,7 +787,7 @@
         "Node name for S&R": "H3PromptRules",
         "h3_prompt_rules_locked": false,
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2"
+        "bbaigc_version": "1.3.3"
       },
       "widgets_values": [
         "通读完整原稿，按事件先后和各镜时长拆分镜头；每镜只安排本镜的新事件，不把整篇剧情重复到每一镜。对白与触发它的动作一起安排，原句少于镜头数时，将有对白的剧情节点自然分布到开头、中段和后段，避免前面连续说完、后面长时间空镜；原稿明确的静默、时间点和剧情因果优先，不机械平均、不新增或重复台词。静默镜头有明确叙事作用，不为填满时长擅加人物、剧情或镜头动作。",
@@ -856,7 +856,7 @@
       "properties": {
         "Node name for S&R": "H3VoiceLibrary",
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2"
+        "bbaigc_version": "1.3.3"
       },
       "widgets_values": [
         "模型默认",
@@ -1441,10 +1441,10 @@
         "h3_image_long_edge": 2048,
         "h3_reference_long_edge": 2048,
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2",
+        "bbaigc_version": "1.3.3",
         "h3_advanced_open": false,
-        "h3_advanced_compact_version": "1.3.2",
-        "h3_director_version": "1.3.2",
+        "h3_advanced_compact_version": "1.3.3",
+        "h3_director_version": "1.3.3",
         "h3_ref_serial": 0,
         "h3_auto_video": false,
         "h3_video_input": "图生视频",
@@ -1616,7 +1616,7 @@
       "properties": {
         "Node name for S&R": "H3ManualImageStudio",
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2",
+        "bbaigc_version": "1.3.3",
         "h3_manual_source_id": "6"
       },
       "widgets_values": [
@@ -1686,7 +1686,7 @@
       "properties": {
         "Node name for S&R": "H3DialogueAudio",
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2"
+        "bbaigc_version": "1.3.3"
       },
       "widgets_values": [
         false,
@@ -1832,7 +1832,7 @@
       "properties": {
         "Node name for S&R": "H3Subtitles",
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2"
+        "bbaigc_version": "1.3.3"
       },
       "widgets_values": [
         false,
@@ -1931,7 +1931,7 @@
       "properties": {
         "Node name for S&R": "H3ManualPlan",
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2"
+        "bbaigc_version": "1.3.3"
       },
       "widgets_values": [
         "{}",
@@ -2124,7 +2124,7 @@
       "properties": {
         "Node name for S&R": "CodexSpeechInput",
         "bbaigc_author": "BBAIGC",
-        "bbaigc_version": "1.3.2"
+        "bbaigc_version": "1.3.3"
       },
       "widgets_values": [
         false,
@@ -2228,12 +2228,12 @@
   ],
   "config": {},
   "extra": {
-    "h3_director_version": "1.3.2",
-    "codex_version": "1.3.2",
+    "h3_director_version": "1.3.3",
+    "codex_version": "1.3.3",
     "bbaigc_author": "BBAIGC",
     "bbaigc_product": "h3",
-    "bbaigc_version": "1.3.2",
-    "workflowVersion": "1.3.2",
+    "bbaigc_version": "1.3.3",
+    "workflowVersion": "1.3.3",
     "bbaigc_public": true,
     "ds": {
       "scale": 0.55,
