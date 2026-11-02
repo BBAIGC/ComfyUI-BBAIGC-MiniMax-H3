@@ -225,13 +225,14 @@ class CodexImageGenerate:
         if 生成路线=='Image2.1':
             from .image_bridge import normalize_settings
             cfg=normalize_settings(Image2配置)
-            model_names=[('unet_gguf' if cfg['model'].endswith('.gguf') else 'diffusion_models',cfg['model']),('text_encoders',cfg['clip']),('vae',cfg['vae'])]
+            model_names=[] if cfg.get('provider')=='bbapi' else [('unet_gguf' if cfg['model'].endswith('.gguf') else 'diffusion_models',cfg['model']),('text_encoders',cfg['clip']),('vae',cfg['vae'])]
         key=_cache_key('generate-prompt-only-v3',提示词,生成路线,宽度,高度,种子,步数,引导,采样器,调度器,Image2配置,_model_stamps(model_names))
         cached=_cached_image(key)
         if cached:return (load_tensor(cached),)
         if 生成路线=='Image2.1':
             from .image_bridge import generate_reference,normalize_settings
-            config=normalize_settings(Image2配置);config.update(steps=步数,cfg=引导,sampler=采样器,scheduler=调度器,denoise=1.0)
+            config=normalize_settings(Image2配置)
+            if config.get('provider')!='bbapi':config.update(steps=步数,cfg=引导,sampler=采样器,scheduler=调度器,denoise=1.0)
             # This dedicated reverse-prompt generator is text-to-image. Reference
             # pixels belong to description/canvas sizing, never edit conditioning.
             result=generate_reference(提示词,None,宽度,高度,seed=种子,settings=config,

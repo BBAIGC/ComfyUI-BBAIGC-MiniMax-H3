@@ -1,5 +1,9 @@
 # 智能体开箱即用 · 全自动快速安装
 
+V1.3的文字/图片API、分镜换图、独立LoRA、二采、脸修与Pika六步使用步骤见[工作台使用说明](docs/WORKBENCH_GUIDE.md)。基础安装不强制下载Pika或脸部检测器。按使用者选定的路线安装，不能将所有可选组件默认打开。公开工作流保留一个稳定入口，升级先备份现有输入与工作流。
+
+可选安装参数：`--with-qwen`准备普通千问分镜图，`--with-pika`只增加Pika专用适配器，`--with-face-refine`准备检测权重并安装ultralytics。也可用`--download-models qwen/pika/face-refine`选单一路线。使用图片API时无需为分镜下载本地千问权重。完整安装后检查已选路线，不要擅自改动未选路线或启用收费生成。
+
 适用于 Codex、Claude Code、Cursor、Windsurf、Trae、通义灵码、CodeBuddy 等具备本地文件与终端能力的智能体。点击下方代码块右上角的复制按钮，将整段粘贴到智能体输入框。网页聊天若没有电脑操作权限，应切换到具备本地工具的智能体。
 
 ```text

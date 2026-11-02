@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import json
 from pathlib import Path
 
 import folder_paths
@@ -17,6 +18,34 @@ IMAGE_CLIP = "qwen3vl_8b_int8_convrot.safetensors"
 IMAGE_VAE = "qwen_image_2.1_vae_bf16.safetensors"
 MISSING = "未找到兼容模型"
 FUSED_MODEL_LABEL = "mystic07 · RefDelta r1024 Turbo8"
+PIKA_MODEL_LABEL = "Pika H3 Flex · 6步"
+PIKA_LORA = "pika_h3_flex_fl2va_v1_bf16.safetensors"
+
+
+def _api_fields(image=False):
+    fields = {
+        "服务来源": (["本地模型", "BBAPI"], {"default": "本地模型"}),
+        "API配置名称": ("STRING", {"default": "asset-library" if image else "bbapi-main"}),
+        "API接口地址": ("STRING", {"default": "https://bbapi.ainivox.cn"}),
+        "API模型": ("STRING", {"default": ""}),
+    }
+    if image:
+        fields.update({"API分辨率": (["1K", "2K", "4K"], {"default": "1K"}),
+                       "API质量": (["low", "medium", "high", "auto"], {"default": "low"}),
+                       "图像LoRA": ("STRING", {"default": "[]", "multiline": False})})
+    else:
+        fields["API协议"] = (["自动", "Responses", "Chat Completions"], {"default": "自动"})
+    return fields
+
+
+def _api_settings(values):
+    from .cloud_bridge import validate_cloud
+    result = {"provider": "bbapi", "profile": str(values.get("API配置名称", "bbapi-main")).strip(),
+              "base_url": str(values.get("API接口地址", "https://bbapi.ainivox.cn")).strip(),
+              "model": str(values.get("API模型", "")).strip()}
+    _, model = validate_cloud(result, "text" if "模型" in values else "image")
+    result["model"] = model
+    return result
 
 
 def _name(value):
@@ -87,6 +116,7 @@ def _video_choices():
         "音频VAE": _files("vae", predicate=lambda name: name.startswith("minimax_h3_audio_vae")),
         "4步LoRA": _files("loras", predicate=lambda name: "minimax_h3_fl2v_turbo_4step" in name),
         "8步LoRA": _files("loras", predicate=lambda name: "minimax_h3_fl2v_turbo_8step" in name),
+        "PikaLoRA": _files("loras", predicate=lambda name: "pika_h3_flex" in name and name.endswith('.safetensors')),
     }
 
 
@@ -100,7 +130,7 @@ class H3TextModelSettings:
             "输出上限": ("INT", {"default": 10000, "min": 512, "max": 32768, "step": 256}),
             "top_p": ("FLOAT", {"default": 0.9, "min": 0.01, "max": 1.0, "step": 0.05}),
             "重复惩罚": ("FLOAT", {"default": 1.05, "min": 0.1, "max": 2.0, "step": 0.05}),
-        }}
+        }, "optional": _api_fields()}
 
     RETURN_TYPES = ("H3_TEXT_SETTINGS",)
     RETURN_NAMES = ("文本模型配置",)
@@ -108,7 +138,18 @@ class H3TextModelSettings:
     CATEGORY = "H3/模型与采样"
     DESCRIPTION = "选择本机千问与规划参数；连接工作台后生效，配置节点不加载模型。"
 
+    @classmethod
+    def VALIDATE_INPUTS(cls, **kwargs):
+        return True
+
     def execute(self, **kwargs):
+        if kwargs.get("服务来源") == "BBAPI":
+            result = _api_settings(kwargs)
+            result["protocol"] = {"自动": "auto", "Responses": "responses", "Chat Completions": "chat"}.get(kwargs.get("API协议", "自动"), "auto")
+            result.update(temperature=_number(kwargs["温度"], 0, 2, "温度"),
+                          num_predict=_number(kwargs["输出上限"], 512, 32768, "输出上限", True),
+                          top_p=_number(kwargs["top_p"], .01, 1, "top_p"))
+            return (result,)
         settings = {
             "model": _selected(kwargs["模型"], local_models(), "千问模型"),
             "temperature": _number(kwargs["温度"], 0, 2, "温度"),
@@ -152,6 +193,7 @@ class H3ImageModelSettings:
                             "tooltip": "结构参考限制上一张AI分镜的细节输入，原始素材继续提供身份、肤质及材质；仅影响AI分镜及结束帧。"}),
             "参考读取长边": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32,
                                      "tooltip": "0自动选择最高2K；仅缩小超出上限的参考图，不把小原图放大。与视频输出尺寸独立。"}),
+            **_api_fields(image=True),
         }}
 
     RETURN_TYPES = ("H3_IMAGE_SETTINGS",)
@@ -161,6 +203,11 @@ class H3ImageModelSettings:
     DESCRIPTION = "配置Qwen-Image 2.1分镜生图和末帧修复；不切换其他模型族。"
 
     def execute(self, **kwargs):
+        if kwargs.get("服务来源") == "BBAPI":
+            result = _api_settings(kwargs)
+            result.update(resolution=kwargs.get("API分辨率", "1K"), quality=kwargs.get("API质量", "low"),
+                          storyboard_long_edge=_number(kwargs.get("分镜图长边", 2048), 0, 4096, "分镜图长边", True))
+            return (result,)
         choices = _image_choices()
         samplers, schedulers = _samplers()
         result = {
@@ -179,6 +226,7 @@ class H3ImageModelSettings:
             "reference_long_edge": _number(kwargs.get("参考读取长边", 0), 0, 4096, "参考读取长边", True),
             "previous_reference_policy": _selected(kwargs.get("上镜参考策略", "完整参考（兼容）"),
                                                    ["完整参考（兼容）", "结构参考（原图细节优先）"], "上镜参考策略"),
+            "loras": kwargs.get("图像LoRA", "[]"),
         }
         if result["storyboard_long_edge"] % 32 or result["reference_long_edge"] % 32:
             raise ValueError("分镜图长边与参考读取长边应为0～4096的32倍数。")
@@ -200,15 +248,21 @@ class H3VideoModelSettings:
         required["原作者模型"][1]["tooltip"] = "mystic07 RefDelta r1024 Turbo8融合权重；不叠加外置LoRA。"
         required.update({
             "启用加速LoRA": ("BOOLEAN", {"default": True}),
-            "加速权重": ([FUSED_MODEL_LABEL, "独立LoRA"], {"default": FUSED_MODEL_LABEL}),
-            "加速步数": ([4, 8], {"default": 4}),
+            "加速权重": ([FUSED_MODEL_LABEL, "独立LoRA", PIKA_MODEL_LABEL], {"default": FUSED_MODEL_LABEL}),
+            "加速步数": ("INT", {"default": 8, "min": 1, "max": 100}),
             "标准步数": ("INT", {"default": 20, "min": 20, "max": 50}),
             "低显存": ("BOOLEAN", {"default": True}),
             "稀疏注意力": ("BOOLEAN", {"default": True}),
             "视频采样器": _choice(samplers, "res_multistep"),
             "视频调度器": _choice(schedulers, "simple"),
         })
-        return {"required": required, "optional": {"角色音色": ("H3_VOICE_SETTINGS",),
+        return {"required": required, "optional": {"PikaLoRA": _choice(choices['PikaLoRA'] + ['未选用（无需下载）'], PIKA_LORA),
+                                                   "视频LoRA": ("STRING", {"default": "[]", "multiline": False}),
+                                                   "视频精修": ("STRING", {"default": "{}", "multiline": False}),
+                                                   "显存预留GB": ("FLOAT", {"default": 0, "min": 0, "max": 12, "step": .5,
+                                                       "tooltip": "0自动：Windows低显存模式下，为20GB及以下显卡预留至少3GB，减少共享显存回退；仅当前镜头生效，结束后恢复原预算。"}),
+                                                   "加速LoRA档位": ([4, 8], {"default": 8}),
+                                                   "角色音色": ("H3_VOICE_SETTINGS",),
                                                    "对白音轨": ("H3_DIALOGUE_TRACK",)}}
 
     RETURN_TYPES = ("H3_VIDEO_SETTINGS",)
@@ -221,32 +275,45 @@ class H3VideoModelSettings:
     def VALIDATE_INPUTS(cls, 加速权重=None, **kwargs):
         # An unused fusion/4-step/8-step weight may be absent on another machine.
         # Keep dropdowns, but defer file and scalar validation to execute's selected route.
-        return 加速权重 in (FUSED_MODEL_LABEL, "原作者融合模型", "独立LoRA") or "加速权重无效。"
+        return 加速权重 in (FUSED_MODEL_LABEL, "原作者融合模型", "独立LoRA", PIKA_MODEL_LABEL) or "加速权重无效。"
 
     def execute(self, **kwargs):
         choices = _video_choices()
         samplers, schedulers = _samplers()
         if not isinstance(kwargs["启用加速LoRA"], bool):
             raise ValueError("加速LoRA开关无效。")
-        if kwargs["加速步数"] not in (4, 8):
-            raise ValueError("加速步数只能为4或8。")
+        pika = kwargs["启用加速LoRA"] and kwargs["加速权重"] == PIKA_MODEL_LABEL
+        steps = _number(kwargs["加速步数"], 1, 100, "加速步数", True)
+        lora_steps = kwargs.get('加速LoRA档位', 4 if steps == 4 else 8)
+        if lora_steps not in (4, 8):raise ValueError('请选择4步或8步加速LoRA权重。')
         fused = kwargs["启用加速LoRA"] and kwargs["加速权重"] in (FUSED_MODEL_LABEL, "原作者融合模型")
         needed = {"文本编码器", "视频VAE", "音频VAE", "原作者模型" if fused else "基础模型"}
         if kwargs["启用加速LoRA"] and not fused:
-            needed.add(f'{int(kwargs["加速步数"])}步LoRA')
+            needed.add('PikaLoRA' if pika else f'{lora_steps}步LoRA')
         result = {key: (_selected(kwargs.get(key), options, key) if key in needed else
                         kwargs.get(key) if kwargs.get(key) in options else None)
                   for key, options in choices.items()}
         result.update({
             "启用加速LoRA": kwargs["启用加速LoRA"],
             "加速权重": ("原作者融合模型" if kwargs["加速权重"] in (FUSED_MODEL_LABEL, "原作者融合模型") else
-                       _selected(kwargs["加速权重"], ["独立LoRA"], "加速权重")),
-            "加速步数": int(kwargs["加速步数"]),
+                       _selected(kwargs["加速权重"], ["独立LoRA", PIKA_MODEL_LABEL], "加速权重")),
+            "加速步数": 6 if pika else steps,
+            "加速LoRA档位": lora_steps,
             "标准步数": _number(kwargs["标准步数"], 20, 50, "标准步数", True),
             "低显存": bool(kwargs["低显存"]), "稀疏注意力": bool(kwargs["稀疏注意力"]),
             "视频采样器": _selected(kwargs["视频采样器"], samplers, "视频采样器"),
             "视频调度器": _selected(kwargs["视频调度器"], schedulers, "视频调度器"),
+            "视频LoRA": kwargs.get("视频LoRA", "[]"),
+            "显存预留GB": _number(kwargs.get("显存预留GB", 0), 0, 12, "显存预留GB"),
         })
+        from .video_postprocess import normalize_settings as normalize_postprocess
+        try:
+            postprocess = json.loads(kwargs.get("视频精修", "{}"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("视频精修配置应为JSON对象。") from error
+        if not isinstance(postprocess, dict):
+            raise ValueError("视频精修配置应为JSON对象。")
+        result["_video_postprocess"] = normalize_postprocess(postprocess)
         if kwargs.get("对白音轨") is not None:
             from .dialogue_audio import normalize_dialogue_track
             track = normalize_dialogue_track(kwargs["对白音轨"])

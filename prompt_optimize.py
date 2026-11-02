@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import logging
 from pathlib import Path
 import re
 import uuid
@@ -28,9 +29,10 @@ DETAIL_LEVELS={
     4:('详细','按主体与图号、姿态动作、空间关系、环境构图、光照材质、编辑边界逐项展开已有信息，明确左右、接触和遮挡；有编辑要求时分别写清修改与保留项。不凭空补全未给出的内容，不靠重复句子增加篇幅。'),
     5:('极详细','逐项核对并完整展开用户已经提供的信息：每个主体与来源图号、身份和外观、姿态表情、前后左右与接触遮挡、环境构图、光照材质、修改项和保留边界。将已有的复杂关系解释清楚，消除含混指代，不合并掉明确需求；只在有依据时展开，不编造细节，不为达到字数重复或增添内容。'),
 }
-PROMPT_REVISION=5
+PROMPT_REVISION=6
 OUTPUT_LANGUAGES=('跟随输入','中文','英文')
 OUTPUT_SCHEMA={'type':'object','properties':{'prompt':{'type':'string'}},'required':['prompt'],'additionalProperties':False}
+log=logging.getLogger(__name__)
 
 
 def output_language(source,selection='跟随输入'):
@@ -88,6 +90,8 @@ def preserve_image_slots(source, output):
     """The model may rewrite prose, but cannot rename or silently drop image identities."""
     slots = {int(value) for value in re.findall(r'<image([1-9]\d*)>', str(source), flags=re.I)}
     if not slots:
+        if re.search(r'<image[1-9]\d*>', str(output), flags=re.I):
+            raise ValueError('原稿没有固定图片标记，优化结果却新增了图片标记。')
         return output
     found = set()
     pattern = r'<image([1-9]\d*)>|\bimage\s*([1-9]\d*)\b|@?(?:参考图|图)\s*([1-9]\d*)(?!\d)'
@@ -101,6 +105,38 @@ def preserve_image_slots(source, output):
     if found != slots:
         raise ValueError('优化结果遗漏原稿的参考图片，未传给生图。请重新优化或关闭优化后使用原文。')
     return text
+
+
+def _image_slot_rule(source):
+    slots=sorted({int(value) for value in re.findall(r'<image([1-9]\d*)>',str(source),flags=re.I)})
+    if not slots:return '本次原稿没有固定图片身份标记，不要新增<imageN>标记。'
+    names='、'.join(f'<image{slot}>' for slot in slots)
+    return f'本次原稿实际引用的图片身份标记只有：{names}。这些标记必须全部保留，不得新增其他图号，不得重编号或互换来源。'
+
+
+def _validated_prompt(text,language,source):
+    issues={}
+    if language_mismatch(text,language,source):
+        issues['language']=f'正文须使用{language}，不得夹带其他语言的叙述段落；用户指定的字面内容除外。'
+    try:
+        text=preserve_image_slots(source,text)
+    except ValueError as error:
+        issues['image_slots']=str(error)
+    return text,issues
+
+
+def _correction_messages(source,text,language,issues):
+    # Start a separate proofreading task: the failed response is data, not an
+    # assistant turn that anchors another pass of the original optimization.
+    system=(f'你是提示词校对器。本次只修正已检测出的错误，正文必须使用{language}。'
+            '原稿是唯一事实依据，待修正正文不能新增要求。保留原稿明确的主体、动作、关系、数量、限制和图号。'
+            '非目标语言的叙述应完整翻译，不删掉英文段落来通过校验；不扩写、不增添内容。'
+            'LoRA触发词、专有名称和用户指定的图中文字保持原样。'
+            '依据原稿恢复遗漏的图片来源，删除擅自新增的图片引用；不得猜测或按顺序替换未知图号。'
+            f'{_image_slot_rule(source)}'
+            '只返回一个JSON对象，唯一字段prompt是修正后的完整正文，不输出解释或备选方案。')
+    return [{'role':'system','content':system},
+            {'role':'user','content':json.dumps({'原始提示词':source,'待修正正文':text,'检测到的问题':issues},ensure_ascii=False)}]
 
 
 def _validate_budget(predict,context):
@@ -211,7 +247,7 @@ class CodexPromptOptimize:
         if not 启用优化:return finish(原始提示词,{**_prompt_stats(原始提示词,language),'seed':种子,'optimized':False,'frozen':False})
         if not 原始提示词.strip():raise ValueError('请填写原始提示词。')
         _validate_budget(输出上限,上下文)
-        system=optimization_system(目标模型,前置规则,详细程度,language)
+        system=optimization_system(目标模型,前置规则,详细程度,language)+'\n'+_image_slot_rule(原始提示词)
         from .prompt_nodes import LocalOllama,local_models
         from .resource_control import release_resources
         if 语言模型 not in local_models():raise ValueError('请选择本机已安装的千问模型。')
@@ -224,11 +260,14 @@ class CodexPromptOptimize:
         cached=directory/(key+'.json')
         if cached.is_file():
             saved=json.loads(cached.read_text(encoding='utf-8'));text=saved.get('text')
-            if isinstance(text,str) and text.strip() and not language_mismatch(text,language,原始提示词):
+            if isinstance(text,str) and text.strip():
+                text,issues=_validated_prompt(text,language,原始提示词)
+            else:issues={'empty':'缓存为空'}
+            if not issues:
                 stats=saved.get('stats') if isinstance(saved.get('stats'),dict) else _prompt_stats(text,language)
                 stats={**stats,'cached':True,'truncated':False,'language':language,'seed':种子,
                        'optimized':True,'frozen':False,'model_load_ns':0,'prompt_eval_ns':0,'output_eval_ns':0}
-                return finish(preserve_image_slots(原始提示词,text),stats)
+                return finish(text,stats)
         release_resources(full=True)
         client=LocalOllama()
         try:
@@ -236,26 +275,29 @@ class CodexPromptOptimize:
             try:
                 messages=[{'role':'system','content':system},
                           {'role':'user','content':json.dumps({'目标模型':目标模型,'输出语言':language,'原始提示词':原始提示词},ensure_ascii=False)}]
-                # Keep the same model only for a possible immediate language correction.
+                # Keep the same model only for bounded immediate corrections.
                 # The finally block unloads it before downstream image encoding starts.
                 payload={'model':语言模型,'stream':False,'think':False,'keep_alive':30,'format':OUTPUT_SCHEMA,
                     'messages':messages,
                     'options':{'temperature':温度,'top_p':top_p,'num_ctx':上下文,'num_predict':输出上限,'seed':种子}}
                 correction_passes=0
-                response=client.request('/api/chat',payload,timeout=600)
-                if response.get('done_reason') in ('length','max_tokens'):raise ValueError('提示词优化达到输出token上限而被截断，请提高输出上限，并为上下文预留输入空间。')
-                text=final_prompt(response.get('message',{}).get('content',''),目标模型)
-                if language_mismatch(text,language,原始提示词):
-                    correction_passes=1
-                    # One local correction only; never silently pass an English body to a Chinese request.
-                    correction={'role':'user','content':f'上一份正文没有遵守{language}输出要求。请只纠正正文语言为{language}，不扩写、不删减需求，不改变图号、LoRA触发词和图中文字；只返回相同结构的prompt JSON。'}
-                    payload['messages']=[*messages,{'role':'assistant','content':json.dumps({'prompt':text},ensure_ascii=False)},correction]
+                corrected_issues=[]
+                for attempt in range(3):
                     response=client.request('/api/chat',payload,timeout=600)
-                    if response.get('done_reason') in ('length','max_tokens'):raise ValueError('提示词语言修正达到输出token上限而被截断，请提高输出上限后重试。')
+                    if response.get('done_reason') in ('length','max_tokens'):raise ValueError('提示词优化达到输出token上限而被截断，请提高输出上限，并为上下文预留输入空间。')
                     text=final_prompt(response.get('message',{}).get('content',''),目标模型)
-                    if language_mismatch(text,language,原始提示词):raise ValueError(f'本机语言模型两次未遵守{language}输出要求，未将错误语言的正文传给生图。请检查前置规则或明确选择输出语言后重试。')
-                text=preserve_image_slots(原始提示词,text)
-                stats={**_prompt_stats(text,language,response),'seed':种子,'correction_passes':correction_passes,'optimized':True,'frozen':False}
+                    text,issues=_validated_prompt(text,language,原始提示词)
+                    if not issues:break
+                    log.warning('Prompt optimization validation failed on attempt %s: %s',attempt+1,','.join(issues))
+                    if attempt==2:
+                        detail='；'.join(issues.values())
+                        raise ValueError(f'提示词经两次自动校正后仍未通过校验：{detail} 未传给生图。可重试优化，或关闭优化使用原稿。')
+                    correction_passes+=1
+                    corrected_issues.extend(issue for issue in issues if issue not in corrected_issues)
+                    payload['messages']=_correction_messages(原始提示词,text,language,issues)
+                    payload['options']={**payload['options'],'temperature':0,'top_p':.9}
+                stats={**_prompt_stats(text,language,response),'seed':种子,'correction_passes':correction_passes,
+                       'corrected_issues':corrected_issues,'optimized':True,'frozen':False}
                 directory.mkdir(parents=True,exist_ok=True)
                 temp=directory/(key+'.'+uuid.uuid4().hex+'.tmp')
                 temp.write_text(json.dumps({'text':text,'stats':stats},ensure_ascii=False),encoding='utf-8');temp.replace(cached)

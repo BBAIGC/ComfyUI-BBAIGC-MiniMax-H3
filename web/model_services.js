@@ -1,0 +1,57 @@
+import {api} from '../../scripts/api.js';
+
+const el=(tag,text='')=>{const item=document.createElement(tag);item.textContent=text;return item;};
+const field=(owner,name)=>owner?.widgets?.find(item=>item.name===name);
+const put=(owner,name,value)=>{const item=field(owner,name);if(!item)return false;item.value=value;item.callback?.(value);owner.graph?.setDirtyCanvas?.(true,true);return true;};
+
+export function createModelServices({source,isBusy,onChange,signal,choices}){
+ const element=el('section'),heading=el('strong','模型与 API');element.append(heading);element.className='h3-service-panel';
+ let alive=true;signal?.addEventListener('abort',()=>{alive=false;for(const input of element.querySelectorAll('input[type=password]'))input.value='';});
+ const refreshers=[];
+ for(const[kind,title,localName]of [['text','语言','模型'],['image','图片','图像模型']]){
+  const section=el('div'),line=el('div'),route=el('select'),local=el('select'),model=el('input'),models=el('datalist'),details=el('details'),summary=el('summary','API 设置'),params=el('div'),profile=el('input'),address=el('input'),key=el('input'),save=el('button','保存密钥'),load=el('button','读取可用模型'),status=el('div');
+  line.className='h3-row';route.append(new Option('本地','本地模型'),new Option('API','BBAPI'));route.setAttribute('aria-label',`${title}模型来源`);local.setAttribute('aria-label',`${title}本地模型`);model.setAttribute('aria-label',`${title}API模型`);model.placeholder='选择或填写 API 模型';model.style.cssText=local.style.cssText='flex:1;min-width:80px;width:0';models.id=`h3-api-${kind}-${crypto.randomUUID()}`;model.setAttribute('list',models.id);key.type='password';key.autocomplete='off';key.placeholder='API 密钥';key.setAttribute('aria-label',`${title}API密钥`);profile.setAttribute('aria-label',`${title}API配置名称`);address.setAttribute('aria-label',`${title}API接口地址`);save.type=load.type='button';
+  line.append(el('span',title),route,local,model);params.style.cssText='display:flex;flex-wrap:wrap;gap:5px';for(const input of[profile,address,key])input.style.cssText='flex:1;min-width:130px';params.append(profile,address,key,save,load);details.append(summary,params,status);section.append(line,models,details);element.append(section);
+  const update=(name,value)=>{const owner=source(kind,true);if(!put(owner,name,value))throw Error('模型配置控件未就绪，请刷新工作流。');onChange(kind);};
+  route.onchange=()=>{update('服务来源',route.value);sync();};local.onchange=()=>update(localName,local.value);for(const[control,name]of [[profile,'API配置名称'],[address,'API接口地址'],[model,'API模型']])control.onchange=()=>update(name,control.value.trim());
+  const extras=kind==='image'?[['API分辨率',['1K','2K','4K']],['API质量',['low','medium','high','auto']]]:[['API协议',['自动','Responses','Chat Completions']]];
+  for(const[name,options]of extras){const control=el('select');control.setAttribute('aria-label',`${title}${name}`);for(const option of options)control.append(new Option(({low:'省费',medium:'标准',high:'精细',auto:'自动'})[option]||option,option));control.onchange=()=>update(name,control.value);params.append(control);refreshers.push(()=>{if(document.activeElement!==control)control.value=field(source(kind),name)?.value||options[0];control.disabled=isBusy();});}
+  const request=async(path,payload)=>{const response=await api.fetchApi(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal});const data=await response.json();if(!response.ok)throw Error(data.error||`请求失败（${response.status}）`);return data;};
+  save.onclick=async()=>{if(!key.value)return;save.disabled=true;try{await request('/bbapi-private/profiles',{profile:profile.value,base_url:address.value,api_key:key.value,default_model:model.value});key.value='';if(alive)status.textContent='密钥已加密保存在本机';}catch(error){if(alive)status.textContent=error.message;}finally{if(alive)save.disabled=false;}};
+  load.onclick=async()=>{load.disabled=true;try{const data=await request('/bbapi-private/models',{profile:profile.value,base_url:address.value,kind});if(!alive)return;if(kind==='text'&&data.kind!=='text')throw Error('请重启 ComfyUI 后读取语言模型');models.replaceChildren(...(data.models||[]).map(item=>new Option(item.id,item.id)));status.textContent=`${data.models?.length||0} 个可用模型`;}catch(error){if(alive)status.textContent=error.message;}finally{if(alive)load.disabled=false;}};
+  let signature='';
+  function sync(){const owner=source(kind),busy=isBusy();route.disabled=busy;route.value=field(owner,'服务来源')?.value||'本地模型';const cloud=route.value==='BBAPI';local.hidden=cloud;model.hidden=!cloud;details.hidden=!cloud;const options=choices(kind,localName),current=field(owner,localName)?.value||'';const next=JSON.stringify([options,current]);if(signature!==next){signature=next;local.replaceChildren(...[...new Set([current,...options].filter(Boolean))].map(name=>new Option(name,name)));}if(document.activeElement!==local)local.value=current;local.disabled=busy;for(const[control,name,fallback]of [[profile,'API配置名称','bbapi-main'],[address,'API接口地址','https://bbapi.ainivox.cn'],[model,'API模型','']]){if(document.activeElement!==control)control.value=field(owner,name)?.value??fallback;control.disabled=busy;}}
+  refreshers.push(sync);
+ }
+ const video=el('button','视频 API（暂未开放）');video.type='button';video.disabled=true;video.style.cssText='font-size:11px;min-height:24px';element.append(video);
+ return {element,refresh(){for(const refresh of refreshers)refresh();}};
+}
+
+export function createLoraSlots({label,read,write,isBusy,isActive=()=>true,defaultSampling=()=>({steps:label.includes('视频')?8:25,cfg:1}),signal}){
+ const element=el('details'),summary=el('summary',label),rows=el('div'),add=el('button','添加 LoRA'),status=el('span');add.type='button';element.append(summary,rows,add,status);let files=[],signature='';
+ const slots=()=>{try{const value=JSON.parse(String(read()||'[]'));return Array.isArray(value)?value:[];}catch{return[];}};
+ const save=value=>{write(JSON.stringify(value));signature='';refresh();};
+ add.onclick=()=>{const value=slots();if(value.length<20){value.push({enabled:false,name:'',strength:1,...defaultSampling()});save(value);}};
+ async function load(){try{const response=await api.fetchApi('/object_info/CodexOptionalModelLora',{signal});if(response.ok){const data=await response.json();files=data.CodexOptionalModelLora?.input?.required?.LoRA文件?.[0]||[];signature='';refresh();}}catch{}}
+ function refresh(){const value=slots(),busy=isBusy(),active=isActive(),next=JSON.stringify([value,busy,active,files]);element.hidden=!active;if(next===signature)return;signature=next;rows.replaceChildren();add.disabled=busy||value.length>=20;status.textContent=value.length?` ${value.filter(item=>item.enabled&&item.name).length} / ${value.length} 启用`:'';
+  value.forEach((slot,index)=>{
+   const row=el('div'),modelLine=el('div'),parameters=el('div'),name=el('select'),remove=el('button','删除'),enabled=el('input');row.className='h3-lora-slot';modelLine.className=parameters.className='h3-row';
+   name.setAttribute('aria-label',`${label}${index+1}文件`);name.style.cssText='min-width:0;flex:1;width:0';name.append(new Option('选择兼容 LoRA',''));for(const file of files.filter(item=>item!=='未选用'))name.append(new Option(file,file));if(slot.name&&!files.includes(slot.name))name.append(new Option(slot.name,slot.name));name.value=slot.name||'';name.disabled=busy;name.onchange=()=>{value[index].name=name.value;save(value);};
+   remove.type='button';remove.disabled=busy;remove.onclick=()=>{value.splice(index,1);save(value);};modelLine.append(name,remove);
+   const defaults=defaultSampling();for(const[key,title,min,max,step,fallback]of [['strength','强度',-4,4,.05,1],['steps','步数',1,100,1,defaults.steps],['cfg','CFG',0,30,.1,defaults.cfg]]){const field=el('label'),input=el('input');field.className='h3-lora-parameter';field.append(el('span',title),input);input.type='number';input.min=String(min);input.max=String(max);input.step=String(step);input.value=String(slot[key]??fallback);input.setAttribute('aria-label',`${label}${index+1}${title}`);input.disabled=busy;input.onchange=()=>{const number=Number(input.value);if(input.value!==''&&Number.isFinite(number)&&number>=min&&number<=max&&(key!=='steps'||Number.isInteger(number))){value[index][key]=number;if(key!=='strength'){value[index].steps??=defaults.steps;value[index].cfg??=defaults.cfg;}save(value);}else{signature='';refresh();}};parameters.append(field);}
+   enabled.type='checkbox';enabled.className='h3-slider-switch';enabled.checked=!!slot.enabled;enabled.disabled=busy;enabled.setAttribute('role','switch');enabled.setAttribute('aria-label',`${label}${index+1}启用`);enabled.onchange=()=>{value[index].enabled=enabled.checked;if(enabled.checked){value[index].steps??=defaults.steps;value[index].cfg??=defaults.cfg;}save(value);};parameters.append(enabled);row.append(modelLine,parameters);rows.append(row);
+  });}
+ element.title='全部启用的 LoRA 共同作用于模型，再按各槽步数和 CFG 依次新增一轮细化采样。关闭的槽位不加载；细化会增加耗时。';
+ load();return {element,refresh};
+}
+
+export function createVideoFinishing({read,write,isBusy,isPika}){
+ const element=el('section'),visible=el('div'),details=el('details'),summary=el('summary','二采 / 脸修参数'),body=el('div'),note=el('div'),fields=[];visible.className='h3-row';details.append(summary,body);element.append(visible,details,note);body.className='h3-config';
+ const defaults={refine_enabled:false,refine_steps:4,refine_denoise:.25,face_enabled:false,face_detector:'face_yolov8m.pt',face_steps:8,face_denoise:.4,face_canvas:512,face_confidence:.35,face_crop_factor:2.5,face_feather:24,face_blend:1};
+ const current=()=>{try{return {...defaults,...JSON.parse(String(read()||'{}'))};}catch{return {...defaults};}};
+ const specs=[['refine_enabled','二次采样','boolean'],['refine_steps','二采步数','number',1,30,1],['refine_denoise','二采降噪','number',.02,.8,.01],['face_enabled','脸部修复','boolean'],['face_detector','检测模型','text'],['face_steps','脸修步数','number',1,30,1],['face_denoise','脸修降噪','number',.02,.8,.01],['face_canvas','脸修尺寸','number',256,768,32],['face_confidence','检测置信度','number',.05,.95,.05],['face_crop_factor','脸部裁剪范围','number',1.2,5,.1],['face_feather','边缘羽化','number',0,128,1],['face_blend','融合强度','number',0,1,.05]];
+ for(const[key,title,type,min,max,step]of specs){const row=el('label'),control=el('input');row.className='h3-field';row.append(el('span',title),control);control.type=type==='boolean'?'checkbox':type;control.setAttribute('aria-label',title);if(type==='boolean'){control.setAttribute('role','switch');control.className='h3-slider-switch';}if(min!==undefined){control.min=String(min);control.max=String(max);control.step=String(step);}control.onchange=()=>{const value=current();value[key]=type==='boolean'?control.checked:type==='number'?Number(control.value):control.value.trim();write(JSON.stringify(value));refresh();};fields.push({key,control,type});(type==='boolean'?visible:body).append(row);}
+ element.title='脸部修复追踪画面中最大的一张脸，裁剪后采样，再通过羽化融合回原视频。多人镜头不会分别修复每张脸。';
+ function refresh(){const value=current(),busy=isBusy(),pika=isPika();for(const{key,control,type}of fields){if(type==='boolean')control.checked=!!value[key];else if(document.activeElement!==control)control.value=String(value[key]);control.disabled=busy||(pika&&type==='boolean'&&!value[key]);}note.textContent=pika?(value.refine_enabled||value.face_enabled?'Pika 六步请先关闭二采和脸修。':'切换标准 H3 路线可启用二采和脸修。'):'';}
+ return {element,refresh};
+}

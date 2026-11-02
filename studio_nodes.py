@@ -490,7 +490,7 @@ def _snapshot_event(manifest,node_id):
     event = {key: manifest.get(key) for key in
              ("run_id", "status", "stage", "scene_index", "scene_count", "mode", "final_video", "error", "failure_context", "optimized_script", "effective_settings", "image_jobs", "image_summary", "timings", "output_directory", "plan_available", "plan_reused", "revision", "regeneration_applied", "duration_mode", "timing_mode", "scene_seconds", "total_seconds", "allocation_receipt", "manual_missing", "image_edit_receipts")}
     event.update(node_id=str(node_id), scenes=[{key: scene.get(key) for key in
-                 ("index", "status", "image", "end_image", "video", "prompt", "display_prompt", "image_prompt", "seconds", "error", "video_timing", "video_seed", "plan_fields", "reference_labels", "spoken_dialogues")}
+                 ("index", "status", "image", "end_image", "video", "prompt", "display_prompt", "image_prompt", "seconds", "error", "video_timing", "video_seed", "plan_fields", "reference_labels", "spoken_dialogues", "input_mode")}
                  for scene in manifest.get("scenes", [])])
     event['planning_progress'] = manifest.get('planning_progress')
     event.update(execution_id=manifest.get('execution_id'),prompt_id=manifest.get('prompt_id'),progress_seq=manifest.get('progress_seq',0),updated_at=manifest.get('updated_at'))
@@ -775,9 +775,15 @@ def _tail_repair_receipt(tail_path, original_path, prompt, settings):
 
 def _bundle(plan, kwargs):
     input_mode = plan.get('input_mode', 'I2V')
-    key = (input_mode,) + tuple(kwargs.get(name) for name in ("基础模型", "原作者模型", "加速权重", "文本编码器", "视频VAE", "音频VAE", "启用加速LoRA", "加速步数", "低显存", "稀疏注意力", "4步LoRA", "8步LoRA"))
-    if input_mode == 'T2VA' and kwargs.get('启用加速LoRA') and kwargs.get('加速权重') != '独立LoRA':
-        raise ValueError('文生视频请使用基础模型或独立加速LoRA；当前融合模型未确认支持无图输入。')
+    from .video_lora import normalize_video_loras, apply_video_loras
+    loras = normalize_video_loras(kwargs.get("视频LoRA", "[]"), target_architecture=
+        "ref2va" if kwargs.get("加速权重") == "原作者融合模型" and kwargs.get("启用加速LoRA") else "fl2va")
+    pika = kwargs.get("加速权重") == "Pika H3 Flex · 6步" and kwargs.get("启用加速LoRA")
+    # Only the 768p Turbo4 text path uses a different sigma shift. Other
+    # text/image transitions can reuse exactly the same bounded model bundle.
+    weight_steps = kwargs.get('加速LoRA档位', 4 if kwargs.get('加速步数') == 4 else 8)
+    schedule_mode = input_mode if weight_steps == 4 and not pika else "shared"
+    key = (schedule_mode, weight_steps, json.dumps(loras, sort_keys=True)) + tuple(kwargs.get(name) for name in ("基础模型", "原作者模型", "加速权重", "文本编码器", "视频VAE", "音频VAE", "启用加速LoRA", "低显存", "稀疏注意力", "4步LoRA", "8步LoRA", "PikaLoRA"))
     if _BUNDLE_CACHE.get("key") != key:
         clear_bundle_cache()
         if kwargs.get("加速权重", "独立LoRA") == "原作者融合模型" and kwargs["启用加速LoRA"]:
@@ -796,19 +802,27 @@ def _bundle(plan, kwargs):
             result = {"model": model, "clip": clip, "vae": vae, "audio_vae": audio_vae,
                       "turbo_enabled": True, "turbo_steps": int(kwargs["加速步数"]),
                       "turbo_lora": "mystic07 · RefDelta r1024 Turbo8", "cfg": 1.0,
+                      "turbo_lora_steps": 8,
                       "sparse_attention": kwargs.get("稀疏注意力", True), "model_name": kwargs["原作者模型"]}
         else:
             result = H3VideoModelBundle().load(
                 ready_plan=json.dumps(plan, ensure_ascii=False), unet_name=kwargs["基础模型"],
                 clip_name=kwargs["文本编码器"], video_vae_name=kwargs["视频VAE"], audio_vae_name=kwargs["音频VAE"],
-                turbo_enabled=kwargs["启用加速LoRA"], accelerated_steps=int(kwargs["加速步数"]),
+                turbo_enabled=kwargs["启用加速LoRA"] and not pika, accelerated_steps=int(kwargs["加速步数"]),
                 low_vram=kwargs["低显存"], sparse_attention=kwargs.get("稀疏注意力", True),
                 turbo_lora_4step=kwargs.get("4步LoRA", TURBO_LORA_4STEP),
                 turbo_lora=kwargs.get("8步LoRA", TURBO_LORA),
-                input_mode=input_mode,
+                input_mode=input_mode, pika_enabled=pika,
+                pika_lora=kwargs.get("PikaLoRA", "pika_h3_flex_fl2va_v1_bf16.safetensors"),
+                turbo_lora_steps=weight_steps,
             )[0]
+        result["model"] = apply_video_loras(result["model"], loras)
+        result["video_loras"] = loras
+        result["input_mode"] = input_mode
         _BUNDLE_CACHE.update(key=key, bundle=result)
-    return {**_BUNDLE_CACHE["bundle"], "ready_plan": json.dumps(plan, ensure_ascii=False)}
+    return {**_BUNDLE_CACHE["bundle"], "input_mode": input_mode,
+            "turbo_steps": 6 if pika else int(kwargs['加速步数']) if kwargs.get('启用加速LoRA') else None,
+            "ready_plan": json.dumps(plan, ensure_ascii=False)}
 
 
 def _optimized_script(plan, scenes):
@@ -968,8 +982,8 @@ class H3StoryboardStudio:
             "语言模型": (models or [PREFERRED_MODEL], {"default": selected}),
             "声音模式": (list(VOICE_MODES), {"default": "自动识别原稿"}),
             "启用加速LoRA": ("BOOLEAN", {"default": True, "label_on": "启用加速", "label_off": "基础模型标准采样", "tooltip": "开启时使用所选融合权重或独立LoRA；关闭时切换未融合基础模型。"}),
-            "加速权重": (["mystic07 · RefDelta r1024 Turbo8", "独立LoRA", "原作者融合模型"], {"default": "mystic07 · RefDelta r1024 Turbo8"}),
-            "加速步数": ([4, 8], {"default": 4}),
+            "加速权重": (["mystic07 · RefDelta r1024 Turbo8", "独立LoRA", "原作者融合模型", "Pika H3 Flex · 6步"], {"default": "mystic07 · RefDelta r1024 Turbo8"}),
+            "加速步数": ("INT", {"default": 4, "min": 1, "max": 100}),
             "标准步数": ("INT", {"default": 20, "min": 20, "max": 50}),
             "随机种子": ("INT", {"default": 42, "min": 0, "max": 2**32 - 1}),
             "低显存": ("BOOLEAN", {"default": True}),
@@ -1007,6 +1021,12 @@ class H3StoryboardStudio:
             "视频种子": ("INT", {"default": -1, "min": -1, "max": 2**32 - 1,
                                "tooltip": "仅用于视频采样；-1沿用原随机种子，不改变规划或分镜图片。"}),
             "视频输入": (["图生视频", "文生视频"], {"default": "图生视频"}),
+            "视频LoRA": ("STRING", {"default": "[]"}),
+            "视频精修": ("STRING", {"default": "{}"}),
+            "PikaLoRA": ("STRING", {"default": "pika_h3_flex_fl2va_v1_bf16.safetensors"}),
+            "文生视频连续衔接": ("BOOLEAN", {"default": True}),
+            "显存预留GB": ("FLOAT", {"default": 0, "min": 0, "max": 12, "step": .5}),
+            "加速LoRA档位": ([4, 8], {"default": 8}),
         }, "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
 
     RETURN_TYPES = ("STRING", "H3_MANUAL_SOURCE")
@@ -1060,7 +1080,7 @@ class H3StoryboardStudio:
             kwargs.pop('视频输入', None)
         else:
             kwargs.update(生成模式='文生视频', 参考图集='[]', 镜头衔接='仅首帧', 末帧处理='直接续接',
-                          手动分镜图片='[]', 生图重做范围='保留现有图片', 重生图片='[]')
+                          生图重做范围='保留现有图片', 重生图片='[]')
         from .prompt_formats import normalize_prompt_format
         from .reference_upscale import normalize_settings as normalize_upscale
         prompt_format = normalize_prompt_format(kwargs.get("提示词格式"))
@@ -1081,6 +1101,7 @@ class H3StoryboardStudio:
             kwargs["语言模型"] = text_settings["model"]
             kwargs["_text_settings"] = text_settings
         supplied_image_settings = image_settings is not None
+        image_export_settings = copy.deepcopy(image_settings)
         if text_only:
             image_settings = None
         elif image_settings is None:
@@ -1089,16 +1110,43 @@ class H3StoryboardStudio:
         image_settings = normalize_settings(image_settings)
         kwargs.pop("分镜图长边", None)
         kwargs.pop("参考读取长边", None)
-        if not text_only and (supplied_image_settings or image_settings["storyboard_long_edge"] or image_settings["reference_long_edge"]):
+        if not text_only and (supplied_image_settings or image_settings["storyboard_long_edge"] or image_settings.get("reference_long_edge", 0)):
             kwargs["_image_settings"] = image_settings
         if video_settings:
             kwargs.update(video_settings)
+        from .video_postprocess import normalize_settings as normalize_postprocess
+        raw_postprocess = kwargs.get('_video_postprocess')
+        if raw_postprocess is None:
+            try:
+                raw_postprocess = json.loads(kwargs.get('视频精修', '{}') or '{}')
+            except (TypeError, ValueError) as exc:
+                raise ValueError('视频精修配置无效，请重新设置。') from exc
+        postprocess = normalize_postprocess(raw_postprocess)
+        from .video_postprocess import validate_available
+        validate_available(postprocess)
+        kwargs.pop('视频精修', None)
+        if postprocess['refine_enabled'] or postprocess['face_enabled']:
+            kwargs['_video_postprocess'] = postprocess
+        else:
+            kwargs.pop('_video_postprocess', None)
+        from .video_lora import normalize_video_loras
+        video_loras = normalize_video_loras(kwargs.get("视频LoRA", "[]"), target_architecture=
+            "ref2va" if kwargs.get("加速权重") in ("原作者融合模型", "mystic07 · RefDelta r1024 Turbo8")
+            and kwargs.get("启用加速LoRA") else "fl2va")
+        if video_loras:
+            kwargs["视频LoRA"] = video_loras
+        else:
+            kwargs.pop("视频LoRA", None)
         from .stage_cache import effective_video_seed as resolve_video_seed
         effective_video_seed = resolve_video_seed(kwargs)
         if kwargs.get("加速权重") == "mystic07 · RefDelta r1024 Turbo8":
             kwargs["加速权重"] = "原作者融合模型"
-        if text_only and kwargs.get('启用加速LoRA') and kwargs.get('加速权重') != '独立LoRA':
-            raise ValueError('文生视频请将视频加速权重切为独立LoRA，或关闭加速使用基础模型。')
+        if kwargs.get('启用加速LoRA') and kwargs.get('加速权重') == 'Pika H3 Flex · 6步':
+            kwargs['加速步数'] = 6
+            if postprocess['refine_enabled'] or postprocess['face_enabled']:
+                raise ValueError('Pika固定六步日程暂不支持二采或裁剪脸修，请关闭精修或切换标准H3路线。')
+            if any('steps' in slot or 'cfg' in slot for slot in video_loras):
+                raise ValueError('Pika固定六步日程暂不支持额外LoRA细化采样，请关闭视频LoRA或切换普通H3。')
 
         from .plan_import import parse_import_payload, import_plan
         import_payload = parse_import_payload(kwargs.get("导入优化计划", "{}"))
@@ -1273,12 +1321,12 @@ class H3StoryboardStudio:
         manifest["source_images"] = [{"id": item["id"], "image": _preview(item["path"]), "status": "就绪",'sha256':reference_identities[i]['sha256']}
                                      for i,item in enumerate(references)]
         manifest["effective_settings"] = {"text": text_settings or {"model": kwargs["语言模型"]},
-                                          "image": None if text_only else image_settings,
+                                          "image": (image_export_settings or image_settings) if text_only else image_settings,
                                           "image_seed": int(kwargs["随机种子"]),
                                           "video_seed": effective_video_seed,
                                           "video": {name: kwargs.get(name) for name in (
                                               "基础模型", "原作者模型", "加速权重", "启用加速LoRA", "加速步数", "标准步数",
-                                              "文本编码器", "视频VAE", "音频VAE", "低显存", "稀疏注意力", "4步LoRA", "8步LoRA", "视频采样器", "视频调度器")}}
+                                              "文本编码器", "视频VAE", "音频VAE", "低显存", "稀疏注意力", "4步LoRA", "8步LoRA", "视频采样器", "视频调度器", "视频LoRA", "PikaLoRA", "_video_postprocess")}}
         node_id = manifest['node_id']
         bundle = last_frame = selected = video = first = end_frame = None
         active_image_job = None
@@ -1362,6 +1410,12 @@ class H3StoryboardStudio:
                 changed = overrides.get(str(i + 1), {})
                 prompt = changed.get("video_prompt") or scene_plan.get("video_prompt") or plan["prompts"][i]
                 image_prompt = changed.get("image_prompt") or scene_plan.get("image_prompt")
+                if text_only and not image_prompt:
+                    from .planner import text_storyboard_image_prompt
+                    image_prompt = text_storyboard_image_prompt(scene_plan.get("start_state", scene_plan.get("visual", "")),
+                                                               plan.get("continuity", ""), scene_plan.get("start_facts"),
+                                                               scene_plan.get("composition", ""))
+                    scene_plan["image_prompt"] = image_prompt
                 prompt = apply_stage_rules(prompt, prompt_rules, "video")
                 from .prompt_formats import video_prompt_for_format
                 prompt = video_prompt_for_format(prompt, prompt_format)
@@ -1443,6 +1497,16 @@ class H3StoryboardStudio:
                 manifest.pop("dialogue_track", None)
             if mode == "手动分镜图":
                 _sync_manual_images(manifest, manual_slots, run_dir, kwargs["适配方式"], constrained, revision_advanced)
+            elif text_only:
+                old_receipts = dict(manifest.get('image_edit_receipts') or {})
+                edited_images = _sync_ai_image_edits(manifest, kwargs.get('手动分镜图片', '[]'), run_dir, kwargs['适配方式'], False)
+                if edited_images and kwargs.get('文生视频连续衔接', True):
+                    first_changed = min(int(key) for key, value in manifest['image_edit_receipts'].items()
+                                        if old_receipts.get(key) != value)
+                    for dependent in manifest['scenes'][first_changed+1:]:
+                        _invalidate_video(dependent)
+                for scene in manifest['scenes']:
+                    scene['input_mode'] = 'I2V' if scene.get('image_path') else 'T2VA'
             elif mode == "AI生成分镜" and keep_plan and cached_plan:
                 _sync_ai_image_edits(manifest, kwargs.get('手动分镜图片', '[]'), run_dir, kwargs['适配方式'], constrained)
                 images_ready_before = (all(Path(scene.get('image_path') or '').is_file() for scene in manifest['scenes'])
@@ -1450,7 +1514,7 @@ class H3StoryboardStudio:
             if mode in ("AI生成分镜", "手动分镜图"):
                 jobs = []
                 previous_jobs = {job["id"]: job for job in manifest.get("image_jobs", [])}
-                total_steps = int(image_settings["steps"])
+                total_steps = int(image_settings.get("steps", 0))
                 for i, scene in enumerate(manifest["scenes"]):
                     ready = bool(scene.get("image_path") and Path(scene["image_path"]).is_file())
                     jobs.append({**previous_jobs.get(f"分镜{i + 1}", {}), "id": f"分镜{i + 1}", "index": i + 1, "prompt": scene["image_prompt"],
@@ -1474,7 +1538,13 @@ class H3StoryboardStudio:
                 manifest["image_jobs"] = jobs
                 _image_summary(manifest)
             elif text_only:
-                manifest['image_jobs'] = []
+                manifest['image_jobs'] = [{"id": f"分镜{i+1}", "index": i+1,
+                    "prompt": scene["image_prompt"], "image": scene.get("image"),
+                    "status": "完成" if scene.get("image_path") else "待上传",
+                    "inserted": bool(scene.get("image_path")), "kind": "optional_storyboard",
+                    "plan_fields": scene.get("plan_fields"), "reference_labels": [],
+                    "input_mode": "I2V" if scene.get("image_path") else "T2VA"}
+                    for i, scene in enumerate(manifest['scenes'])]
                 _image_summary(manifest)
             elif mode in TAIL_SEQUENCE_MODES and tail_mode == "Image2.1修复":
                 previous_jobs = {job["id"]: job for job in manifest.get("image_jobs", [])}
@@ -1487,7 +1557,7 @@ class H3StoryboardStudio:
                     jobs.append({**previous_jobs.get(job_id, {}), "id": job_id, "index": i + 1, "kind": "tail_repair",
                                  "prompt": _tail_repair_prompt(plan["scenes"][i]),
                                  "status": "完成" if ready else "等待", "percent": 100.0 if ready else None,
-                                 "value": int(image_settings["steps"]) if ready else 0, "total": int(image_settings["steps"]),
+                                 "value": int(image_settings.get("steps", 0)) if ready else 0, "total": int(image_settings.get("steps", 0)),
                                  "image": _preview(scene["repaired_image_path"]) if ready else None, "inserted": ready,
                                  "timing": _timing_record(previous_jobs.get(job_id, {}).get("timing"), "completed" if ready else "pending")})
                 manifest["image_jobs"] = jobs
@@ -1660,7 +1730,17 @@ class H3StoryboardStudio:
                 if completed.is_file() and scene.get("status") == "完成":
                     continue
                 if text_only:
-                    first = None
+                    first = _load_image(scene["image_path"]) if scene.get("image_path") else None
+                    if first is None and i and kwargs.get('文生视频连续衔接', True):
+                        previous_tail = manifest['scenes'][i-1].get('tail_path')
+                        if previous_tail and Path(previous_tail).is_file():
+                            first = fit_reference(_load_image(previous_tail), width, height, kwargs['适配方式'])
+                            scene['image'] = _preview(previous_tail)
+                            scene['continuation_from'] = i
+                    scene["input_mode"] = "I2V" if first is not None else "T2VA"
+                    scene["prompt"] = video_prompt_for_format(apply_stage_rules(
+                        render_h3_prompt(plan["compiled_prompts"][i], input_mode=scene["input_mode"],
+                                         duration_seconds=durations[i]), prompt_rules, "video"), prompt_format)
                 elif mode in TAIL_SEQUENCE_MODES and i:
                     previous = manifest["scenes"][i - 1]
                     tail_path = previous.get("tail_path")
@@ -1716,12 +1796,17 @@ class H3StoryboardStudio:
                 timings.start(scene["video_timing"])
                 scene["status"] = "生成中"
                 _emit(manifest, node_id, "video", i + 1)
-                selected_plan = {**plan, "seconds_per_scene": durations[i]}
-                if bundle is None:
+                selected_plan = {**plan, "seconds_per_scene": durations[i],
+                                 "input_mode": scene.get("input_mode", input_mode)}
+                if bundle is None or bundle.get("input_mode", "I2V") != selected_plan["input_mode"]:
+                    bundle = None
                     bundle = _bundle(selected_plan, kwargs)
                 selected = {**bundle, "ready_plan": json.dumps(selected_plan, ensure_ascii=False),
                             "_voice_settings": kwargs.get("_voice_settings"), "_voice_scene": plan["scenes"][i],
                             "_dialogue_track": kwargs.get("_dialogue_track"),
+                            "_video_postprocess": kwargs.get("_video_postprocess"),
+                            "_vram_reserve_gb": kwargs.get("显存预留GB", 0),
+                            "_low_vram": kwargs.get("低显存", True),
                             "_user_silent": kwargs.get("声音模式") == "静音",
                             "_dialogue_offset_seconds": sum(round(round(seconds * 24) / 24 * 32000) for seconds in durations[:i]) / 32000}
                 scene_seed = resolve_scene_video_seed(effective_video_seed, i, scene, overrides.get(str(i + 1)))

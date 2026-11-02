@@ -200,8 +200,12 @@ class LocalOllama:
             stdout=self.log_file, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        deadline = time.monotonic() + 45
+        # GPU discovery can outlast 45 seconds after another model process
+        # releases a nearly full device. Keep startup cancellable and bounded.
+        deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
+            if self.cancel_check:
+                self.cancel_check()
             if self.process.poll() is not None:
                 raise RuntimeError(f"本地语言模型服务未启动，请查看 {log_path}")
             try:

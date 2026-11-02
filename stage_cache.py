@@ -58,6 +58,19 @@ def stage_fingerprints(kwargs, references, durations, *, image_settings, width, 
     image_hash = _digest(image)
     video = {"image": image_hash, "settings": {key: kwargs.get(key) for key in VIDEO_KEYS},
              "implementation": _implementation_identities(("shot_nodes.py", "native_nodes.py"))}
+    if kwargs.get("视频LoRA"):
+        video["settings"]["视频LoRA"] = kwargs["视频LoRA"]
+        video["implementation"]["video_lora.py"] = _implementation_identities(("video_lora.py",))["video_lora.py"]
+    if kwargs.get("加速权重") == "Pika H3 Flex · 6步":
+        video["settings"]["PikaLoRA"] = kwargs.get("PikaLoRA", "pika_h3_flex_fl2va_v1_bf16.safetensors")
+    if '加速LoRA档位' in kwargs:
+        video['settings']['加速LoRA档位'] = kwargs['加速LoRA档位']
+    postprocess = kwargs.get("_video_postprocess") or {}
+    if postprocess.get("refine_enabled") or postprocess.get("face_enabled"):
+        video["settings"]["_video_postprocess"] = postprocess
+        video["implementation"].update(_implementation_identities(("video_postprocess.py",)))
+    if kwargs.get('视频输入') == '文生视频':
+        video['settings']['文生视频连续衔接'] = kwargs.get('文生视频连续衔接', True)
     video_seed = effective_video_seed(kwargs)
     # Legacy tasks did not store a separate video seed. Omitted, inherited and
     # explicitly identical values retain their original video stage identity.

@@ -653,6 +653,8 @@ class CodexQwenStudioRepair:
         if engine == 'Image2.1' and kwargs.get('使用外接配置'):
             from .image_bridge import normalize_settings
             cfg = normalize_settings(kwargs.get('Image2配置'))
+            if cfg.get('provider') == 'bbapi':
+                return _cache_key('qwen-studio-repair-cloud-v1', kwargs)
             names = [('unet' if cfg['model'].lower().endswith('.gguf') else 'diffusion_models', cfg['model']),
                      ('text_encoders', cfg['clip']), ('vae', cfg['vae'])]
         else:
@@ -693,6 +695,25 @@ class CodexQwenStudioRepair:
                 'model': Image2模型, 'clip': Image2编码器, 'vae': Image2VAE, 'steps': Image2步数, 'cfg': Image2CFG,
                 'sampler': Image2采样器, 'scheduler': Image2调度器, 'denoise': Image2降噪,
                 'cache_device': Image2缓存设备, 'cache_dtype': Image2缓存精度, 'clip_device': Image2编码器设备})
+            if cfg.get('provider') == 'bbapi':
+                prompt = '\n'.join(text for text in (修复规则, 补充要求) if text.strip())
+                if not prompt:
+                    raise ValueError('请填写修复规则或补充要求。')
+                key = _cache_key('qwen-studio-repair-cloud-v1', prepared, prompt, cfg, 种子, width, height)
+                cached = _cached_image(key)
+                if cached:
+                    return self._preview(load_tensor(cached), dimensions=dimensions)
+                from .image_bridge import generate_reference
+                path = tensor_path(prepared)
+                try:
+                    image = load_tensor(generate_reference(prompt, str(path), width, height, seed=种子, settings=cfg))
+                finally:
+                    path.unlink(missing_ok=True)
+                if tuple(image.shape[1:3]) != (height, width):
+                    from comfy.utils import common_upscale
+                    image = common_upscale(image.movedim(-1, 1), width, height, 'lanczos', 'disabled').movedim(1, -1)
+                dimensions.update(engine='BBAPI', api_model=cfg['model'])
+                return self._preview(load_tensor(_save_cached(image, key)), dimensions=dimensions)
             # Retain the prepared reference budget even when requesting a smaller output.
             cfg['reference_long_edge'] = max(32, min(4096, ((max(prepared.shape[1:3])+31)//32)*32))
             names = [('unet' if cfg['model'].lower().endswith('.gguf') else 'diffusion_models', cfg['model']),

@@ -145,10 +145,13 @@ def install_workflow(payload, target_dir, identity, version):
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f'{identity}.json'
     if target.exists() and target.read_bytes() != payload:
-        target = target_dir / f'{identity}-V{version}.json'
-        if target.exists() and target.read_bytes() != payload:
-            target = target_dir / f'{identity}-V{version}-{time.time_ns()}.json'
-    if not target.exists():
+        # This is the installer-owned entry; preserve any edits before updating
+        # the stable filename. User-created workflows elsewhere are untouched.
+        backup_dir = target_dir.parent.parent / 'bbaigc' / 'workflow-backups'
+        backup = backup_dir / f'{identity}-{time.time_ns()}.json'
+        atomic_write(backup, target.read_bytes())
+        print('原入口已备份：', backup)
+    if not target.exists() or target.read_bytes() != payload:
         atomic_write(target, payload)
     return target
 
@@ -205,8 +208,11 @@ def main():
     parser.add_argument('--custom-nodes-dir', type=Path)
     parser.add_argument('--user-dir', type=Path, help='启动参数 --user-directory 对应目录')
     parser.add_argument('--workflow-dir', type=Path)
-    parser.add_argument('--download-models', choices=['none', 'speech', 'qwen-turbo', 'krea', 'h3'], default='none')
+    parser.add_argument('--download-models', choices=['none', 'speech', 'qwen', 'qwen-turbo', 'krea', 'h3', 'pika', 'face-refine'], default='none')
     parser.add_argument('--with-speech', action='store_true', help='额外下载完整 CPU 语音模型')
+    parser.add_argument('--with-qwen', action='store_true', help='额外下载普通Qwen2.1分镜图模型与共用编码器、VAE')
+    parser.add_argument('--with-pika', action='store_true', help='额外下载Pika H3 Flex六步LoRA，不改变默认路线')
+    parser.add_argument('--with-face-refine', action='store_true', help='额外安装ultralytics及脸部检测权重，不默认启用脸修')
     parser.add_argument('--skip-pip', action='store_true', help='已有依赖时跳过 pip')
     args = parser.parse_args()
     root = args.comfy_root.resolve()
@@ -247,11 +253,12 @@ def main():
         gguf_path = checkout(url, existing_package(custom, url, ('ComfyUI-GGUF',)))
         patch_gguf(gguf_path, base / '.bbaigc-install' / 'gguf-compat-backup')
         packages.append(gguf_path)
-    if identity in ('image', 'bbapi'):
+    if identity in ('image', 'h3', 'bbapi'):
         url = 'https://github.com/BBAIGC/' + REPOS['bbapi']
         packages.append(checkout(url, existing_package(custom, url, (REPOS['bbapi'], 'ComfyUI-BBAPI-Private'))))
-        url = 'https://github.com/rgthree/rgthree-comfy'
-        packages.append(checkout(url, existing_package(custom, url, ('rgthree-comfy',))))
+        if identity in ('image', 'bbapi'):
+            url = 'https://github.com/rgthree/rgthree-comfy'
+            packages.append(checkout(url, existing_package(custom, url, ('rgthree-comfy',))))
     if identity == 'h3':
         # Existing minimal FFN package already registers the same node as KJNodes.
         minimal = custom / 'ComfyUI-MiniMaxH3-LowVRAM'
@@ -266,11 +273,17 @@ def main():
                         for arg in ('-r', package / 'requirements.txt')]
         if requirements:
             protected_pip(python, requirements, env['packages'])
+        if args.with_face_refine or args.download_models == 'face-refine':
+            protected_pip(python, ['ultralytics'], env['packages'])
     target = install_workflow(payload, target_dir, identity, version)
     presets = json.loads((HERE / 'model-presets.json').read_text(encoding='utf-8'))
     selected = [] if args.download_models == 'none' else list(presets[args.download_models])
     if args.with_speech and args.download_models != 'speech':
         selected.extend(presets['speech'])
+    for enabled, preset in ((args.with_qwen, 'qwen'), (args.with_pika, 'pika'), (args.with_face_refine, 'face-refine')):
+        if enabled and args.download_models != preset:
+            selected.extend(presets[preset])
+    selected = list({item['dest']: item for item in selected}.values())
     if selected:
         pending = []
         for item in selected:
@@ -311,7 +324,7 @@ def main():
     state[identity] = version
     atomic_write(state_path, json.dumps(state, ensure_ascii=False, indent=2).encode('utf-8'))
     print('安装完成。工作流：', target)
-    print('原有工作流与密钥保持不变；已有同名文件时公开版另存带版本号的新文件。')
+    print('已更新固定入口；原入口的修改保留在workflow-backups，其他工作流和密钥不变。')
     print('请重启 ComfyUI。Ollama 与可选插件按 MODELS.md 安装；未指定时不下载模型。')
 
 

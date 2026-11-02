@@ -105,9 +105,9 @@ def _request(raw, source=None, image_settings=None):
     if not isinstance(data, dict):
         raise ValueError("独立生图任务格式应为对象。")
     source = source if isinstance(source, dict) else {}
-    if source and source.get("mode") != "手动分镜图":
+    if source and source.get("mode") not in ("手动分镜图", "文生视频"):
         raise ValueError("独立生图节点只在手动分镜图模式启用。")
-    if data.get("source_mode") != "手动分镜图" and not source:
+    if data.get("source_mode") not in ("手动分镜图", "文生视频") and not source:
         raise ValueError("请从手动分镜工作台导入提示词。")
     task_id = _task_id(data.get("task_id"))
     shots = data.get("shots", [])
@@ -134,8 +134,8 @@ def _request(raw, source=None, image_settings=None):
             raise ValueError("分镜编号重复或提示词为空，请检查队列。")
         ids.add(identity)
         references = row.get("references", data.get("references", []))
-        if not isinstance(references, list) or not 1 <= len(references) <= 16:
-            raise ValueError(f"{identity}需要选择1～16张参考图。")
+        if not isinstance(references, list) or not 0 <= len(references) <= 16:
+            raise ValueError(f"{identity}最多选择16张参考图。")
         refs = []
         for ref in references:
             _image_path(ref)
@@ -256,9 +256,9 @@ class H3ManualImageStudio:
                     paths = [_image_path(ref) for ref in row["references"]]
                     candidate_number = len(row["candidates"])
                     seed = (request["seed"] + ordinal + candidate_number * 1009) % 2**32
-                    output = generate_reference(row["prompt"], paths[0], request["width"], request["height"],
+                    output = generate_reference(row["prompt"], paths[0] if paths else None, request["width"], request["height"],
                                                 seed=seed, reference_paths=paths[1:], settings=request["image_settings"],
-                                                progress_callback=progress)
+                                                progress_callback=progress, text_only=not paths)
                     from .output_metadata import current_metadata, save_png
                     if current_metadata():
                         from PIL import Image

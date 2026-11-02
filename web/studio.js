@@ -9,6 +9,9 @@ import { createReferenceUpscalePanel } from "./reference_upscale.js";
 import {fileKind,decodeScript,downloadPlan,updateIdentity} from './plan_files.js';
 import {attachSpeechInput} from './speech_input.js';
 import {createImageSamplingControls} from './image_sampling_controls.js';
+import {createModelServices,createLoraSlots,createVideoFinishing} from './model_services.js';
+import {restoreLegacyTextVideoWeights,videoModelSummary} from './video_model_selection.js';
+import {rememberModelSchema,modelSchema,ensureModelWidgets,modelChoices} from './model_settings_compat.js';
 import {seedMode,setSeedMode,prepareH3Seed,currentH3Seed,setH3Seed,imageSeedMode,setImageSeedMode,currentH3ImageSeed,prepareH3ImageSeed,randomH3SceneSeed} from './h3_seed.js';
 
 const TYPE = "H3StoryboardStudio";
@@ -19,7 +22,7 @@ const MODES = ["逐镜参考图", "上一镜末帧", "AI生成分镜", "手动�
 const MODE_LABELS = ["逐镜生成", "末帧续接", "AI分镜", "手动分镜", "高清续接"];
 const PROMPT_FORMATS = ["工作台格式", "H3六段式"];
 const VIDEO_INPUTS = ['图生视频','文生视频'];
-const VIDEO_ONLY_FIELDS=new Set(["启用加速LoRA","加速权重","加速步数","标准步数","基础模型","原作者模型","文本编码器","视频VAE","音频VAE","视频采样器","视频调度器","稀疏注意力","低显存","完成后","视频种子"]);
+const VIDEO_ONLY_FIELDS=new Set(["启用加速LoRA","加速权重","加速步数","加速LoRA档位","标准步数","基础模型","原作者模型","文本编码器","视频VAE","音频VAE","视频采样器","视频调度器","稀疏注意力","低显存","完成后","视频种子","视频LoRA","PikaLoRA","视频精修","文生视频连续衔接","显存预留GB"]);
 const STATUS = { pending: "等待中", waiting: "等待中", running: "生成中", generating: "生成中", completed: "已完成", done: "已完成", ready: "已就绪", prepared: "分镜图已就绪", failed: "失败", error: "失败", cancelled: "已取消", interrupted: "已中断", "等待":"等待中", "准备图片":"准备图片", "图片就绪":"图片已就绪", "修复末帧":"修复末帧", "生成中":"生成中", "完成":"已完成", "失败":"失败", "已取消":"已取消" };
 const STAGES = { planning: "规划分镜", planned:"剧本已优化", manual_waiting:"等待手动分镜图片", images: "生成分镜图", image: "生成分镜图", images_ready:"分镜图已就绪", end_image:"生成结束图", repair:"修复末帧", restoring: "修复衔接帧", loading: "加载视频模型", video: "生成视频", joining: "合成完整视频", cleanup: "释放模型", prepared: "分镜图已就绪", completed: "已完成", done: "已完成" };
 
@@ -187,6 +190,15 @@ function installStyle() {
       .h3-studio .h3-field>span {flex:0 0 90px;font-size:12px}
       .h3-studio .h3-field input:not([type=checkbox]),.h3-studio .h3-field select {width:auto;max-width:100%;min-width:0;flex:1}.h3-studio .h3-field select {max-width:260px}
       .h3-studio .h3-field input[type=checkbox] {min-height:18px;width:18px;height:18px;accent-color:#888}
+      .h3-studio .h3-lora-slot{padding:7px 0;border-bottom:1px solid var(--border-color,#444)}
+      .h3-studio .h3-lora-parameter{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px;font-size:11px;color:#aaa}
+      .h3-studio .h3-lora-parameter input{min-width:0;width:100%;padding:3px 5px;color:var(--input-text,#ddd)}
+      .h3-studio input.h3-slider-switch[type=checkbox]{appearance:none;-webkit-appearance:none;position:relative;flex:0 0 34px;align-self:flex-end;width:34px!important;height:19px!important;min-height:19px!important;padding:0!important;border:1px solid #777;border-radius:10px!important;background:#555;cursor:pointer;transition:background .15s ease}
+      .h3-studio input.h3-slider-switch[type=checkbox]:before{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#ddd;transition:transform .15s ease}
+      .h3-studio input.h3-slider-switch[type=checkbox]:checked{background:#b2b2b2}
+      .h3-studio input.h3-slider-switch[type=checkbox]:checked:before{transform:translateX(15px);background:#222}
+      .h3-studio input.h3-slider-switch[type=checkbox]:disabled{opacity:.45;cursor:default}
+      .h3-studio input.h3-slider-switch[type=checkbox]:focus-visible{outline:2px solid #ddd;outline-offset:2px}
       .h3-studio .h3-aspects {display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
       .h3-studio .h3-aspect[aria-pressed=true] {font-weight:650;outline:1px solid currentColor;outline-offset:-1px}
       .h3-studio .h3-aspect-note {font-size:12px;opacity:.75;margin-top:6px;min-height:18px}
@@ -408,7 +420,17 @@ function installStyle() {
       .h3-studio .h3-final-tools>.h3-plan-toggle {font-size:11px;white-space:normal}
       .h3-studio .h3-final-column>.h3-final {margin-top:var(--h3-final-top-offset,0px);width:100%}
       .h3-studio .h3-final-media {width:var(--h3-final-frame-width,100%);max-width:100%;margin-left:auto;margin-right:auto}
-      @container (max-width:590px) {.h3-studio .h3-preview-deck{grid-template-columns:minmax(0,1fr) var(--h3-final-column-width,155px)}.h3-studio .h3-final-column{border-top:0;border-left:1px solid var(--border-color,#555);padding:0 12px}.h3-studio .h3-final-column>.h3-final{margin-top:var(--h3-final-top-offset,0px)}}
+      .h3-studio .h3-preview-deck{grid-template-columns:minmax(0,1fr) 8px var(--h3-final-column-width,260px);gap:0}
+      .h3-studio .h3-final-splitter{align-self:stretch;cursor:col-resize;touch-action:none;position:relative;min-height:180px}
+      .h3-studio .h3-final-splitter:after{content:'';position:absolute;left:3px;top:0;bottom:0;width:1px;background:var(--border-color,#555)}
+      .h3-studio .h3-final-splitter:hover:after,.h3-studio .h3-final-splitter:focus-visible:after{width:3px;background:#d8b94b}
+      .h3-studio .h3-final-column{border-left:0}
+      .h3-studio .h3-model-tools-section{border-bottom:1px solid var(--border-color,#555);padding:6px 0;margin-bottom:6px}
+      .h3-studio .h3-service-panel>.h3-row,.h3-studio .h3-service-panel>div{margin-top:4px}
+      .h3-studio .h3-model-tools{align-items:flex-start;margin:5px 0}
+      .h3-studio .h3-model-tools>details{min-width:0;flex:1}
+      .h3-studio .h3-video-acceleration{border-top:1px solid var(--border-color,#555);padding:7px 0}
+      @container (max-width:590px) {.h3-studio .h3-preview-deck{grid-template-columns:minmax(0,1fr) 8px var(--h3-final-column-width,155px)}.h3-studio .h3-final-column{border-top:0;border-left:0;padding:0 12px}.h3-studio .h3-final-column>.h3-final{margin-top:var(--h3-final-top-offset,0px)}}
 
       .h3-studio .h3-scene-regenerate {position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:4;max-width:calc(100% - 16px);padding:5px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;line-height:1.4;color:#f5df94;background:#252525e8;border-color:#b8a265;opacity:0;pointer-events:none;transition:opacity 140ms ease}
       .h3-studio .h3-scene-frame:hover .h3-scene-regenerate,.h3-studio .h3-scene-regenerate:focus-visible,.h3-studio .h3-scene-regenerate[aria-pressed=true] {opacity:1;pointer-events:auto}
@@ -572,6 +594,12 @@ function restoreAddedWidgetValues(node,saved,imageConfig=false){
     }
 }
 
+function installSettingsSerialization(type,data){
+    const serialized=type.prototype.onSerialize,configured=type.prototype.onConfigure;
+    type.prototype.onSerialize=function(saved){const result=serialized?.apply(this,arguments);saved.widgets_values_named=Object.fromEntries((this.widgets||[]).filter(widget=>widget.serialize!==false&&['string','number','boolean'].includes(typeof widget.value)).map(widget=>[widget.name,widget.value]));return result;};
+    type.prototype.onConfigure=function(saved){const result=configured?.apply(this,arguments);for(const widget of this.widgets||[]){const value=saved?.widgets_values_named?.[widget.name];if(value===undefined)continue;const declaration=data.input?.required?.[widget.name]||data.input?.optional?.[widget.name],kind=declaration?.[0];if(Array.isArray(kind)&&!kind.includes(value))continue;if(kind==='BOOLEAN'&&typeof value!=='boolean'||['INT','FLOAT'].includes(kind)&&typeof value!=='number'||kind==='STRING'&&typeof value!=='string')continue;widget.value=value;if(widget.inputEl)widget.inputEl.value=String(value);}return result;};
+}
+
 function createScriptEditor(getReferences,options={}) {
     const editor = el("div","h3-rich-editor");
     editor.contentEditable = options.readOnly?"false":"true"; editor.spellcheck = false;editor.tabIndex=0;
@@ -675,16 +703,21 @@ function createScriptEditor(getReferences,options={}) {
 function setupStudio(node,nodeData) {
     if (node._h3Studio) return;
     installStyle();
+    ensureModelWidgets(node);
     const widgets = new Map((node.widgets || []).map(widget => [widget.name, widget]));
     const configControls = new Map();
     function updateControlTitle(control){const help=control.dataset.h3Help;if(help)control.title=control.type==="checkbox"?help:`${help}\n当前值：${control.value}`;}
     const configFields=new Map();
     const configPorts={text:"文本模型配置",image:"图像模型配置",video:"视频模型配置",rules:"提示词规则"};
-    function configSource(kind){
+    function configSource(kind,create=false){
         const input=node.inputs?.find(input=>input.name===configPorts[kind]);
-        if(input?.link==null)return null;
-        const link=node.graph?.links?.get?.(input.link) ?? node.graph?.links?.[input.link];
-        return link?node.graph?.getNodeById?.(link.origin_id ?? link[1]):null;
+        const link=input?.link==null?null:node.graph?.links?.get?.(input.link) ?? node.graph?.links?.[input.link];
+        let owner=link?node.graph?.getNodeById?.(link.origin_id ?? link[1]):null;
+        if(!owner&&create&&kind!=='rules'){
+            owner=LiteGraph.createNode({text:'H3TextModelSettings',image:'H3ImageModelSettings',video:'H3VideoModelSettings'}[kind]);
+            if(owner&&node.graph){node.graph.add(owner);owner.pos=[node.pos[0]-Math.max(300,owner.size?.[0]||300)-40,node.pos[1]];owner.connect(0,node,node.inputs.findIndex(item=>item.name===configPorts[kind]));}
+        }
+        if(owner)ensureModelWidgets(owner);return owner;
     }
     function upstreamWidget(name){
         if(name==="语言模型")return configSource("text")?.widgets?.find(widget=>["模型","model","语言模型"].includes(widget.name));
@@ -834,6 +867,7 @@ function setupStudio(node,nodeData) {
     }
     async function reconcileExecutionQueue(reason="idle"){
         if(disposed||!snapshot||!["running","generating"].includes(snapshot.status))return;
+        if(node.properties?.h3_external_run_id===snapshot.run_id){recoverLiveProgress(true);return;}
         if(queueCheckPromise)return queueCheckPromise;
         if(Date.now()-lastQueueCheck<900)return;
         lastQueueCheck=Date.now();const run=currentRun;
@@ -852,7 +886,7 @@ function setupStudio(node,nodeData) {
         })();return queueCheckPromise;
     }
     function coreEventMatches(data){return !!data&&(activePromptId&&data.prompt_id===activePromptId||!activePromptId&&String(data.node_id??data.node??"")===String(node.id));}
-    function armExecution(){submissionArmed=true;allowFreshExecution=true;activePromptId=null;pendingExecutionStart=null;lastRecoveredKey='';if(currentRun){terminalRuns.delete(currentRun);oldRuns.delete(currentRun);}if(node.properties)delete node.properties.h3_core_terminal;}
+    function armExecution(){submissionArmed=true;allowFreshExecution=true;activePromptId=null;pendingExecutionStart=null;lastRecoveredKey='';if(currentRun){terminalRuns.delete(currentRun);oldRuns.delete(currentRun);}if(node.properties){delete node.properties.h3_core_terminal;delete node.properties.h3_external_run_id;}}
     async function recoverLiveProgress(force=false){
         if(disposed||progressFetch||!currentRun&&!submissionArmed)return;
         if(!force&&!submissionArmed&&!['running','generating'].includes(snapshot?.status))return;
@@ -1069,6 +1103,7 @@ function setupStudio(node,nodeData) {
     const imageSamplingFields={model:"图像模型",steps:"步数",cfg:"CFG",denoise:"去噪",sampler:"采样器",scheduler:"调度器"};
     let imageSamplingSource=null,imageSamplingControls=null;
     function refreshImageSampling(source=configSource("image")){
+        imageSampling.hidden=source?.widgets?.find(item=>item.name==='服务来源')?.value==='BBAPI';
         if(source!==imageSamplingSource){
             imageSamplingControls?.dispose();imageSamplingControls=null;imageSamplingSource=source;
             imageSamplingBody.replaceChildren();
@@ -1104,6 +1139,12 @@ function setupStudio(node,nodeData) {
     const connectionLines=new Map();const modelConnections=el("div","h3-models");
     for(const[kind,label]of[["text","文本"],["image","图像"],["video","视频"],["rules","规则"]]){const row=el("div","h3-model-line");const name=el("span","h3-grow");row.append(el("strong","",label),name);connectionLines.set(kind,name);modelConnections.append(row);}
     const autoVideoRow=el('label','h3-plan-toggle'),autoVideoToggle=el('input');autoVideoToggle.type='checkbox';autoVideoToggle.setAttribute('role','switch');autoVideoToggle.setAttribute('aria-label','生图后生成视频');autoVideoRow.append(autoVideoToggle,el('span','','生图后生成视频'));autoVideoRow.title='仅AI分镜：保留计划首轮仍先停在剧本。关闭后生图完成停一次，再点继续可生成视频。';autoVideoToggle.onchange=()=>write('生图后生成视频',autoVideoToggle.checked);
+    const modelServices=createModelServices({source:configSource,choices:(kind,name)=>modelChoices(configSource(kind)||{type:kind==='text'?'H3TextModelSettings':'H3ImageModelSettings'},name),isBusy:()=>queueing||['running','generating'].includes(snapshot?.status),onChange:()=>refreshModelConnections(true),signal:controller.signal});
+    const videoLoras=createLoraSlots({label:'视频 LoRA',read:()=>value('视频LoRA','[]'),defaultSampling:()=>({steps:Number(value('加速步数',8)),cfg:1}),write:next=>{const upstream=upstreamWidget('视频LoRA');if(upstream){upstream.value=next;upstream.callback?.(next);}write('视频LoRA',next);if(canKeepVideoPlan())markVideoSettingsChanged(true);refreshModelConnections(false);},isBusy:()=>queueing||['running','generating'].includes(snapshot?.status),signal:controller.signal});
+    const imageLoras=createLoraSlots({label:'图片 LoRA',read:()=>configSource('image')?.widgets?.find(item=>item.name==='图像LoRA')?.value||'[]',defaultSampling:()=>{const owner=configSource('image'),field=name=>owner?.widgets?.find(item=>item.name===name)?.value;return {steps:Number(field('步数')??25),cfg:Number(field('CFG')??1)};},write:next=>{const source=configSource('image',true),widget=source?.widgets?.find(item=>item.name==='图像LoRA');if(widget){widget.value=next;widget.callback?.(next);source.graph?.setDirtyCanvas?.(true,true);refreshModelConnections(true);}},isBusy:()=>queueing||['running','generating'].includes(snapshot?.status),signal:controller.signal});
+    const videoFinishing=createVideoFinishing({read:()=>value('视频精修','{}'),write:next=>writeSetting('视频精修',next),isBusy:()=>queueing||['running','generating'].includes(snapshot?.status),isPika:()=>!!value('启用加速LoRA',true)&&value('加速权重','')==='Pika H3 Flex · 6步'});
+    const toolsRow=el('div','h3-row h3-model-tools');toolsRow.append(videoLoras.element,imageLoras.element);
+    const modelTools=el('section','h3-model-tools-section');modelTools.append(modelServices.element,toolsRow,videoFinishing.element);
     settingsSection.append(modeRow, modeHint, durationBar,targetDurationRow,durationGrid,aspectRow,aspectNote,videoScaleRow,imageSampling,imageSizing,imageSizingNote,imageSizingError,basicGrid,seedRow,autoVideoRow,referenceUpscale.element,modelConnections,configDetails);
 
     const previewSection = el("section","h3-preview-section");
@@ -1212,9 +1253,16 @@ function setupStudio(node,nodeData) {
         finally{if(!disposed)openOutput.disabled=false;}
     };
     outputRow.append(openOutput,outputPath,copyOutput);
-    const previewDeck=el("div","h3-preview-deck"),shotPanel=el("div","h3-shot-panel"),finalColumn=el("div","h3-final-column");
+    const previewDeck=el("div","h3-preview-deck"),shotPanel=el("div","h3-shot-panel"),finalColumn=el("div","h3-final-column"),finalSplitter=el('div','h3-final-splitter');
+    finalSplitter.tabIndex=0;finalSplitter.setAttribute('role','separator');finalSplitter.setAttribute('aria-orientation','vertical');finalSplitter.setAttribute('aria-label','调整分镜与成片宽度');
+    function saveFinalWidth(next){node.properties||={};node.properties.h3_final_column_width=Math.max(155,Math.min(Math.max(155,resultColumn.clientWidth-208),next));setPixelStyle(previewDeck,'--h3-final-column-width',node.properties.h3_final_column_width);finalSplitter.setAttribute('aria-valuenow',String(Math.round(node.properties.h3_final_column_width)));scheduleWorkspaceFit();node.graph?.setDirtyCanvas?.(true,true);}
+    let finalDrag=null;
+    finalSplitter.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();const scale=root.getBoundingClientRect().width/root.offsetWidth||1;finalDrag={pointer:event.pointerId,x:event.clientX,width:finalColumn.getBoundingClientRect().width/scale,scale};finalSplitter.setPointerCapture(event.pointerId);},{signal:controller.signal});
+    finalSplitter.addEventListener('pointermove',event=>{if(!finalDrag||event.pointerId!==finalDrag.pointer)return;event.preventDefault();saveFinalWidth(finalDrag.width-(event.clientX-finalDrag.x)/finalDrag.scale);},{signal:controller.signal});
+    for(const name of ['pointerup','pointercancel','lostpointercapture'])finalSplitter.addEventListener(name,()=>{finalDrag=null;},{signal:controller.signal});
+    finalSplitter.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();event.stopPropagation();const width=Number(node.properties?.h3_final_column_width)||finalColumn.clientWidth;saveFinalWidth(event.key==='Home'?155:event.key==='End'?resultColumn.clientWidth-208:width+(event.key==='ArrowLeft'?1:-1)*(event.shiftKey?50:10));},{signal:controller.signal});
     shotPanel.append(previewViewBar,previewBar,progressState,singlePreview,manualBar,allScrollBar,allScenes,promptDetails,actionRow);
-    const finalTools=el("div","h3-final-tools");finalTools.append(outputRow,resultTimingRow,autoOpenLabel);finalColumn.append(finalTools,finalBox);previewDeck.append(shotPanel,finalColumn);previewSection.append(previewDeck);
+    const finalTools=el("div","h3-final-tools");finalTools.append(outputRow,resultTimingRow,autoOpenLabel);finalColumn.append(finalTools,finalBox);previewDeck.append(shotPanel,finalSplitter,finalColumn);previewSection.append(previewDeck);
 
     const releaseSection = el("section","h3-release-section");
     const releaseRow = el("div", "h3-row");
@@ -1230,11 +1278,12 @@ function setupStudio(node,nodeData) {
     const imageJobViews=new Map();
     const layoutBar=el("div","h3-layout-bar");layoutBar.setAttribute("role","group");layoutBar.setAttribute("aria-label","工作台布局");
     const versionLabel=el("strong","h3-studio-title","小陈 MiniMax H3 多分镜工作台");versionLabel.append(el("small","",`V${H3_STUDIO_VERSION}`));layoutBar.append(versionLabel);
+    const helpLink=el('a','','使用说明');helpLink.href='https://github.com/BBAIGC/ComfyUI-BBAIGC-MiniMax-H3/blob/main/docs/WORKBENCH_GUIDE.md';helpLink.target='_blank';helpLink.rel='noopener noreferrer';helpLink.style.cssText='margin-left:auto;color:inherit;font-size:12px';layoutBar.append(helpLink);
     const layoutButtons=new Map();for(const[mode,label]of[["horizontal","横向"],["vertical","纵向"]]){const button=el("button","",label);button.type="button";button.onclick=()=>applyLayout(mode);layoutButtons.set(mode,button);layoutBar.append(button);}
     const workspace=el("div","h3-workspace");const sourceColumn=el("div","h3-column h3-source-column");const resultColumn=el("div","h3-column h3-result-column");
     const sourceSplitter=makeSplitter("source"),imageSplitter=makeSplitter("image");
     const deckBridgeTop=el("span","h3-deck-bridge"),deckBridgeBottom=el("span","h3-deck-bridge");imageSplitter.append(deckBridgeTop,deckBridgeBottom);
-    const sourceScroll=el("div","h3-source-scroll");sourceScroll.title="滚轮滚动设置，也可拖动右侧滚动条。";sourceScroll.append(videoInputBar,referenceSection,scriptSection,settingsSection);sourceColumn.append(sourceScroll,releaseSection);resultColumn.append(optimizedSection,previewSection);workspace.append(sourceColumn,sourceSplitter,resultColumn,imageSplitter,imageColumn);root.append(layoutBar,workspace);
+    const sourceScroll=el("div","h3-source-scroll");sourceScroll.title="滚轮滚动设置，也可拖动右侧滚动条。";sourceScroll.append(videoInputBar,modelTools,referenceSection,scriptSection,settingsSection);sourceColumn.append(sourceScroll,releaseSection);resultColumn.append(optimizedSection,previewSection);workspace.append(sourceColumn,sourceSplitter,resultColumn,imageSplitter,imageColumn);root.append(layoutBar,workspace);
     for(const column of[sourceColumn,resultColumn,imageColumn])column.title="内容区滚动 · 空白处滚轮缩放画布";
     function panelHeight(){return 440;}
     function layoutMinimumSize(){return [activeLayout==="horizontal"?(imagePlanningMode()?1200:760):560,540];}
@@ -1264,9 +1313,10 @@ function setupStudio(node,nodeData) {
         const finalFixed=toolbar+50+46;
         const available=columnHeight-optimizedSection.offsetHeight-Math.max(shotFixed,finalFixed)-24;
         const finalRatio=finalVideo.videoWidth&&finalVideo.videoHeight?finalVideo.videoWidth/finalVideo.videoHeight:sceneMediaRatio(null);
-        const maxFinalWidth=Math.max(80,columnWidth*.48-25);
+        const savedFinalWidth=Number(node.properties?.h3_final_column_width),selectedFinalWidth=Number.isFinite(savedFinalWidth)&&savedFinalWidth>0?Math.max(155,Math.min(Math.max(155,columnWidth-208),savedFinalWidth)):null;
+        const maxFinalWidth=Math.max(80,(selectedFinalWidth??columnWidth*.48)-25);
         const height=Math.round(Math.max(120,Math.min(900,available,maxFinalWidth/finalRatio)));
-        const finalWidth=Math.round(Math.max(155,Math.min(columnWidth*.48,height*finalRatio+25)));
+        const finalWidth=selectedFinalWidth??Math.round(Math.max(155,Math.min(columnWidth*.48,height*finalRatio+25)));
         setPixelStyle(previewDeck,"--h3-final-column-width",finalWidth);
         if(Math.abs(height-previewFrameHeight)<2)return;
         previewFrameHeight=height;setPixelStyle(root,"--h3-preview-frame-height",height);
@@ -1355,13 +1405,7 @@ function setupStudio(node,nodeData) {
         node.properties||={};node.properties.h3_video_input_drafts||={};
         node.properties.h3_video_input_drafts[mode]={fields:Object.fromEntries(['分镜覆盖','计划编辑','导入优化计划','重生图片','生图重做范围','保留分镜计划'].map(name=>[name,value(name)])),optimized:node.properties.h3_optimized_import_text,planDraft:node.properties.h3_plan_edit_draft};
     }
-    function textVideoWeights(restore=false){
-        node.properties||={};const backups=node.properties.h3_text_video_weights||{};
-        if(restore){for(const[id,prior]of Object.entries(backups)){const source=id==='self'?node:node.graph?.getNodeById?.(Number(id))??node.graph?.getNodeById?.(id);const widget=source?.widgets?.find(item=>item.name==='加速权重');if(widget&&widget.value==='独立LoRA'){widget.value=prior;if(widget.inputEl)widget.inputEl.value=String(prior);}}delete node.properties.h3_text_video_weights;return;}
-        if(!isTextVideo())return;
-        for(const source of new Set([node,configSource('video')].filter(Boolean))){const widget=source.widgets?.find(item=>item.name==='加速权重');if(!widget)continue;const id=source===node?'self':String(source.id);if(!(id in backups))backups[id]=widget.value;if(widget.value!=='独立LoRA'){widget.value='独立LoRA';if(widget.inputEl)widget.inputEl.value='独立LoRA';source.graph?.setDirtyCanvas?.(true,true);}}
-        node.properties.h3_text_video_weights=backups;
-    }
+    function textVideoWeights(){restoreLegacyTextVideoWeights(node);}
     function switchVideoInput(next){
         if(!VIDEO_INPUTS.includes(next)||queueing||['running','generating'].includes(snapshot?.status))return;
         const previous=isTextVideo()?'文生视频':'图生视频';if(previous===next)return;
@@ -1377,16 +1421,18 @@ function setupStudio(node,nodeData) {
         const text=isTextVideo(),busy=queueing||['running','generating'].includes(snapshot?.status);root.dataset.textVideo=String(text);
         videoInputIndicator.style.transform=`translateX(${text?100:0}%)`;for(const[mode,button]of videoInputButtons){button.setAttribute('aria-checked',String((mode==='文生视频')===text));button.tabIndex=((mode==='文生视频')===text)?0:-1;button.disabled=busy||!widgets.has('视频输入');}
         for(const element of[referenceSection,modeRow,modeHint,imageSampling,imageSizing,imageSizingNote,imageSizingError,imageSeedRow,autoVideoRow,referenceUpscale.element])element.classList.add('h3-text-video-hidden');
-        for(const name of['镜头衔接','末帧处理','适配方式','执行范围','原作者模型'])configFields.get(name)?.classList.add('h3-text-video-hidden');
+        for(const name of['镜头衔接','末帧处理','适配方式','执行范围'])configFields.get(name)?.classList.add('h3-text-video-hidden');
         scriptBar.querySelector('.h3-muted')?.classList.add('h3-text-video-hidden');
         textarea.title=text?'输入人物、场景、动作与对白。':'图1、参考图2或image 3自动关联；也可用@选择参考图。';scriptBar.title=text?'原始视频剧本':'直接输入图号自动关联，也支持粘贴参考图。';
         connectionLines.get('image')?.parentElement?.classList.add('h3-text-video-hidden');
-        const weight=configControls.get('加速权重');if(weight){for(const option of weight.options||[])option.disabled=text&&option.value!=='独立LoRA';weight.disabled=busy||text;}
+        const weight=configControls.get('加速权重');if(weight){for(const option of weight.options||[])option.disabled=false;weight.disabled=busy;}
+        const step=configControls.get('加速步数');if(step){const pika=!!value('启用加速LoRA',true)&&value('加速权重','')==='Pika H3 Flex · 6步';step.disabled=busy||pika;if(pika)step.value='6';step.title=pika?'Pika 使用官方固定六步日程；切回普通 H3 可自定义步数。':'实际采样步数，1～100；手动输入不会改变加速LoRA权重。';}
         aspectButtons.get('跟随图片').hidden=text;if(text)aspectPicker.hidden=true;
     }
     function isManualMode(){return !isTextVideo()&&modeSelect.value==="手动分镜图";}
     function aiImageEditingMode(){return !isTextVideo()&&modeSelect.value==="AI生成分镜"&&!!value("保留分镜计划",false)&&!!snapshot?.run_id&&!draftChanged;}
-    function imageEditingMode(){return isManualMode()||aiImageEditingMode();}
+    function textImageEditingMode(){return isTextVideo()&&!!value('保留分镜计划',false)&&!!snapshot?.run_id&&!draftChanged;}
+    function imageEditingMode(){return isManualMode()||aiImageEditingMode()||textImageEditingMode();}
     function imageEditSlots(){try{const raw=JSON.parse(String(value("手动分镜图片","[]")));return Array.isArray(raw)?raw.slice(0,sceneCount()+1):[];}catch{return[];}}
     function storyboardImage(index){
         if(isManualMode())return manualImages()[index]||null;
@@ -1394,7 +1440,7 @@ function setupStudio(node,nodeData) {
         if(entry&&snapshot?.run_id&&entry._run_id===snapshot.run_id&&snapshot.image_edit_receipts?.[String(index)]!==entry._edit_id)return entry.clear?null:normalizeManualImage(entry);
         return index===sceneCount()?snapshot?.scenes?.at(-1)?.end_image||null:sceneAt(index)?.image||null;
     }
-    function imagePlanningMode(){return !isTextVideo()&&["AI生成分镜","手动分镜图","末帧高清续接"].includes(modeSelect.value);}
+    function imagePlanningMode(){return isTextVideo()||["AI生成分镜","手动分镜图","末帧高清续接"].includes(modeSelect.value);}
     function manualImages(){
         try{const raw=JSON.parse(String(value("手动分镜图片",node.properties?.h3_manual_images||"[]")));return Array.isArray(raw)?Array.from({length:sceneCount()+1},(_,index)=>normalizeManualImage(raw[index])):[];}catch{return[];}
     }
@@ -1406,7 +1452,7 @@ function setupStudio(node,nodeData) {
     function manualCanEdit(){return imageEditingMode()&&!manualUploading&&!queueing&&!["running","generating"].includes(snapshot?.status);}
     function manualNotice(text){manualStatus.textContent=text;manualStatus.title=text;}
     function persistManualImages(images,changed){
-        if(aiImageEditingMode()){
+        if(aiImageEditingMode()||textImageEditingMode()){
             const edits=imageEditSlots();
             for(const index of changed){edits[index]={...(images[index]||{clear:true}),_run_id:snapshot.run_id,_edit_id:globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`};}
             write("手动分镜图片",JSON.stringify(edits));write("继续任务",snapshot.run_id);
@@ -1462,22 +1508,22 @@ function setupStudio(node,nodeData) {
     function renderManualControls(){
         manualBar.hidden=!imageEditingMode();manualChoose.disabled=!manualCanEdit();manualClear.disabled=!manualCanEdit()||!storyboardImage(selected);manualClearAll.disabled=!manualCanEdit()||!Array.from({length:sceneCount()+1},(_,i)=>storyboardImage(i)).some(Boolean);manualFileInput.disabled=!manualCanEdit();
         manualChoose.textContent=`${isManualMode()?"选择":"替换"}图片 · ${selected===sceneCount()?"结束帧":`分镜${selected+1}`}`;
-        importAllImages.hidden=!isManualMode();importAllImages.disabled=!snapshot?.image_jobs?.some(job=>job.prompt);
+        importAllImages.hidden=!(isManualMode()||isTextVideo());importAllImages.disabled=!snapshot?.image_jobs?.some(job=>job.prompt);
     }
     function manualTarget(){
         for(const output of node.outputs||[])for(const linkId of output.links||[]){const link=node.graph?.links?.get?.(linkId)??node.graph?.links?.[linkId];const target=node.graph?.getNodeById?.(link?.target_id??link?.[3]);if(target?.type==="H3ManualImageStudio")return target;}
         return node.graph?._nodes?.find(target=>target.type==="H3ManualImageStudio"&&String(target.properties?.h3_manual_source_id)===String(node.id))||null;
     }
     async function importManualPrompts(job=null){
-        if(!isManualMode())return;const target=manualTarget();
+        if(!isManualMode()&&!isTextVideo())return;const target=manualTarget();
         if(!target?.h3ManualImageStudio?.importShots){imageSummaryState.textContent="请先将“分镜生图”连接到右侧独立生图节点。";return;}
         const jobs=job?[job]:(snapshot?.image_jobs||[]).filter(item=>/^分镜\d+$/.test(item.id));const shots=jobs.filter(item=>String(effectiveImagePrompt(item)).trim()).map(item=>({id:item.id,index:Number(item.index)||Number(item.id.match(/\d+/)?.[0])||1,prompt:String(effectiveImagePrompt(item))}));
         if(!shots.length){imageSummaryState.textContent="请先运行一次，完成分镜剧本规划。";return;}
-        const canvas=snapshot?.canvas||{},payload={sourceNodeId:node.id,shots,references:references.map(item=>({...item})),width:canvas.width??canvas["宽度"],height:canvas.height??canvas["高度"],image_settings:snapshot?.effective_settings?.image};
+        const canvas=snapshot?.canvas||{},payload={sourceNodeId:node.id,sourceMode:isTextVideo()?'文生视频':'手动分镜图',shots,references:isTextVideo()?[]:references.map(item=>({...item})),width:canvas.width??canvas["宽度"],height:canvas.height??canvas["高度"],image_settings:snapshot?.effective_settings?.image};
         try{await target.h3ManualImageStudio.importShots(payload);if(!disposed)imageSummaryState.textContent=`已导入${shots.length}条提示词及参考图。`;}catch(error){if(!disposed)imageSummaryState.textContent=error.message||"导入失败。";}
     }
     function notifyManualMode(){
-        const enabled=isManualMode(),signature=`${node.id}:${enabled}`;manualTarget()?.h3ManualImageStudio?.setSourceEnabled?.(node.id,enabled);
+        const enabled=isManualMode()||isTextVideo(),signature=`${node.id}:${enabled}`;manualTarget()?.h3ManualImageStudio?.setSourceEnabled?.(node.id,enabled);
         if(signature===manualModeSignature)return;manualModeSignature=signature;document.dispatchEvent(new CustomEvent("h3-manual-mode-changed",{detail:{sourceNodeId:node.id,enabled}}));
     }
     function clearManualDrag(){manualDrag=null;delete allScenes.dataset.fileDrag;for(const view of allSceneRows.values()){delete view.row.dataset.dragSource;delete view.row.dataset.dropSide;delete view.row.dataset.shift;}}
@@ -1682,13 +1728,14 @@ function setupStudio(node,nodeData) {
         for(const[name,control]of configControls){if(document.activeElement===control&&control.type!=="checkbox")continue;if(control.type==="checkbox"){control.checked=!!value(name);control.setAttribute("aria-checked",String(control.checked));}else control.value=String(value(name,""));updateControlTitle(control);}
         for(const[kind,{source,settings}]of Object.entries(sourceData)){
             const effective=snapshot?.effective_settings?.[kind]||{};
-            let model=kind==="text"?(settings["模型"]??settings.model??effective.model??value("语言模型","")):kind==="image"?(settings["图像模型"]??settings.model??effective.model):((settings["启用加速LoRA"]&&settings["加速权重"]==="原作者融合模型")?settings["原作者模型"]:(settings["基础模型"]??effective["基础模型"]));
-            if(kind==="video"&&!source)model=value("启用加速LoRA")&&value("加速权重")==="原作者融合模型"?value("原作者模型"):value("基础模型");
+            const videoSettings=kind==='video'?Object.fromEntries(['启用加速LoRA','加速权重','加速步数','基础模型','原作者模型'].map(name=>[name,value(name,effective[name])])):null;
+            const videoSummary=videoSettings?videoModelSummary(videoSettings):null;
+            let model=kind==="text"?(settings["模型"]??settings.model??effective.model??value("语言模型","")):kind==="image"?(settings["图像模型"]??settings.model??effective.model):videoSummary?.model;
             if(kind==="rules")model=source?"六类提示词规则":"默认提示词规则";
-            connectionLines.get(kind).textContent=`${source?"已连接":"工作台"} · ${model||"默认模型"}${kind==='video'&&isTextVideo()?` · 文生 · ${value('启用加速LoRA')?'独立LoRA':'基础模型'}`:''}`;
+            connectionLines.get(kind).textContent=`${source?"已连接":"工作台"} · ${model||"默认模型"}${kind==='video'?` · ${isTextVideo()?'文生':'图生'} · ${videoSummary.route}`:''}`;
             connectionLines.get(kind).title=String(model||"");
         }
-        if(!isTextVideo()){refreshImageSampling(sourceData.image?.source);renderImageSizing();referenceUpscale.render();}renderImageSeed();renderSeed();renderVideoInput();
+        if(!isTextVideo()){refreshImageSampling(sourceData.image?.source);renderImageSizing();referenceUpscale.render();}modelServices.refresh();videoLoras.refresh();imageLoras.refresh();videoFinishing.refresh();renderImageSeed();renderSeed();renderVideoInput();
     }
     function insertReference(reference) {
         const from = atRange?.[0] ?? textarea.selectionStart ?? textarea.value.length;
@@ -1912,7 +1959,7 @@ function setupStudio(node,nodeData) {
         const imageURL = mediaURL(imageItem); setMedia(image,imageURL); imagePlaceholder.hidden = !!imageURL;
         const endImageURL = mediaURL(endImageItem); setMedia(endImage,endImageURL); endImagePlaceholder.hidden = !!endImageURL;
         endFrameBox.hidden = !constrained && !endImageURL;
-        imageBox.hidden=isTextVideo();referenceBindingLabel.hidden=isTextVideo();imagePromptEditor.hidden=isTextVideo();imagePromptEditor.previousElementSibling.hidden=isTextVideo();
+        imageBox.hidden=isTextVideo()&&!imageItem;referenceBindingLabel.hidden=isTextVideo()&&!imageItem;imagePromptEditor.hidden=false;imagePromptEditor.previousElementSibling.hidden=false;
         firstFrameBox.style.width = endFrameBox.hidden ? "100%" : "50%";
         const bindings = Array.from(String(scene?.display_prompt || "").matchAll(/@(?:(?:分镜|首帧|图)\d+|结束帧)/g),match=>match[0]);
         const firstBinding = bindings[0] || (["AI生成分镜","手动分镜图"].includes(modeSelect.value) ? `@分镜${selected+1}` : modeSelect.value === "逐镜参考图" ? `@${references[selected]?.id || `图${selected+1}`}` : "");
@@ -2082,7 +2129,7 @@ function setupStudio(node,nodeData) {
         const count=sceneCount();for(const[index,view]of allSceneRows)if(index>=count){if(activeAllScene===index)releaseAllScenePlayer();view.row.remove();allSceneRows.delete(index);}
         for(let index=0;index<count;index++){
             const scene=sceneAt(index),view=allSceneRows.get(index)||createSceneRow(index);
-            const seconds=displayedDuration(index);view.title.textContent=`镜头${index+1}${seconds?` · ${seconds}秒`:""}`;
+            const seconds=displayedDuration(index);view.title.textContent=`镜头${index+1}${seconds?` · ${seconds}秒`:""}${scene?.input_mode?` · ${scene.input_mode==='T2VA'?'文生':'图生'}`:''}`;
             const status=snapshot?.video_settings_changed&&!["running","generating"].includes(snapshot.status)?"视频待重做":STATUS[scene?.status]||scene?.status||"等待中";view.status.textContent=status;
             renderSceneTimings(index,view);
             const manual=isManualMode(),manualImage=storyboardImage(index);let first=imageEditingMode()?manualImage:scene?.image;
@@ -2096,7 +2143,7 @@ function setupStudio(node,nodeData) {
             const busy=["running","generating","生成中","准备图片","修复末帧"].includes(scene?.status)&&!url;
             view.overlay.hidden=!busy;view.overlayText.textContent=status;
             view.row.dataset.manual=String(imageEditingMode());view.row.dataset.manualSelected=String(imageEditingMode()&&selected===index);view.player.draggable=manual&&manualCanEdit()&&!!manualImage;
-            view.inspect.textContent=manual?"选择图片":"查看/编辑";view.inspect.disabled=manual&&!manualCanEdit();view.replace.hidden=!aiImageEditingMode();view.replace.disabled=!manualCanEdit();view.remove.hidden=!imageEditingMode()||!manualImage;view.remove.disabled=!manualCanEdit();
+            view.inspect.textContent=manual?"选择图片":"查看/编辑";view.inspect.disabled=manual&&!manualCanEdit();view.replace.hidden=!(aiImageEditingMode()||textImageEditingMode());view.replace.disabled=!manualCanEdit();view.remove.hidden=!imageEditingMode()||!manualImage;view.remove.disabled=!manualCanEdit();
             if(manual&&!imageURL&&!url)view.waiting.textContent="点击选中 · 拖入 / 粘贴图片";
             if(playing&&imageURL)allSceneVideo.poster=imageURL;
             sizeSceneMedia(view);
@@ -2207,7 +2254,7 @@ function setupStudio(node,nodeData) {
             view.progress.hidden=!sampled||percent===null;if(percent!==null)view.progress.value=percent;
             const jobImage=imageEditingMode()?slots[(Number(job.index)||1)-1]:job.image;const url=mediaURL(jobImage);setMedia(view.picture,url);view.placeholder.hidden=!!url;view.placeholder.textContent=manual?"待放入":"待生成";
             view.inserted.textContent=manual?(jobImage?"图片已就绪":"等待选择、拖入或粘贴图片"):(job.inserted?"已自动插入分镜与总览":job.image?"图片已生成，等待插入":"待生成");
-            view.transfer.hidden=!manual;view.transfer.disabled=!String(effectiveImagePrompt(job)).trim();
+            view.transfer.hidden=!(manual||isTextVideo());view.transfer.disabled=!String(effectiveImagePrompt(job)).trim();
             const text=String(effectiveImagePrompt(job));if(!view.editing&&view.prompt.value!==text&&document.activeElement!==view.prompt){view.prompt.value=text;sizeImagePrompt(view);view.copy.textContent="复制提示词";view.copy.removeAttribute("title");}
             view.copy.disabled=!text;
             view.edit.textContent=manual?"选择图片":job.id==="结束帧"?"定位末镜":"定位并编辑本镜";view.edit.disabled=manual?!manualCanEdit():!snapshot?.run_id;
@@ -2378,15 +2425,15 @@ function setupStudio(node,nodeData) {
         finally {if (!disposed) releaseButton.disabled = ["running","generating"].includes(snapshot?.status);}
     };
 
-    const privateFields = new Set(["剧本", "参考图集", "生成模式", "分镜数量", "每镜秒数", "继续任务", "重做镜头", "分镜覆盖","保留分镜计划","计划编辑","生图重做范围","重生图片","时长模式","目标总秒数","画幅参考图","手动分镜图片","导入优化计划","提示词格式","衔接超分配置","分镜图长边","参考读取长边","视频短边上限","生图后生成视频"]);
-    const visibleBasics=new Set(["镜头衔接","画幅","生成档位","自定义宽度","自定义高度","启用加速LoRA","加速权重","加速步数","完成后","执行范围"]);
+    const privateFields = new Set(["剧本", "参考图集", "生成模式", "分镜数量", "每镜秒数", "继续任务", "重做镜头", "分镜覆盖","保留分镜计划","计划编辑","生图重做范围","重生图片","时长模式","目标总秒数","画幅参考图","手动分镜图片","导入优化计划","提示词格式","衔接超分配置","分镜图长边","参考读取长边","视频短边上限","生图后生成视频","视频LoRA","视频精修","语言模型"]);
+    const visibleBasics=new Set(["镜头衔接","画幅","生成档位","自定义宽度","自定义高度","启用加速LoRA","加速权重","加速步数","加速LoRA档位","完成后","执行范围"]);
     for (const [name,widget] of widgets) {
         hiddenWidget(widget);
         if (!widget) continue;
         const callback = widget.callback;
         widget.callback = function () {const result = callback?.apply(this,arguments); if (!syncing) syncFromWidgets(); return result;};
         if (privateFields.has(name)||name==='视频种子'||name==='随机种子'||name==='视频输入') continue;
-        const field = el("label", "h3-field"); field.append(el("span", "", ({"生成档位":"档位","镜头衔接":"衔接","启用加速LoRA":"加速","加速权重":"权重","加速步数":"步数","执行范围":"范围","自定义宽度":"宽度","自定义高度":"高度","文本编码器":"文本编码","原作者模型":"融合模型","视频采样器":"采样器","视频调度器":"调度器","稀疏注意力":"稀疏注意","随机种子":"分镜生图种子"})[name]||name));field.title=name;
+        const field = el("label", "h3-field"); field.append(el("span", "", ({"生成档位":"档位","镜头衔接":"衔接","启用加速LoRA":"启用加速","加速权重":"加速方案","加速步数":"实际步数","加速LoRA档位":"LoRA档位","执行范围":"范围","自定义宽度":"宽度","自定义高度":"高度","文本编码器":"文本编码","原作者模型":"融合模型","视频采样器":"采样器","视频调度器":"调度器","稀疏注意力":"稀疏注意","随机种子":"分镜生图种子"})[name]||name));field.title=name;
         const declaration = nodeData?.input?.required?.[name] || nodeData?.input?.optional?.[name];
         const fieldOptions = declaration?.[1] || widget.options || {};
         let choices = Array.isArray(declaration?.[0]) ? declaration[0] : widget.options?.values;
@@ -2422,7 +2469,8 @@ function setupStudio(node,nodeData) {
             "标准步数":"关闭加速配置后使用的采样步数。",
             "完成后":"选择生成结束后保留或释放模型；保留模型可减少下次加载时间。",
             "执行范围":"选择本次只准备分镜图，还是继续生成视频。",
-            "声音模式":"选择视频是否生成声音；外部角色音色节点可提供指定人物的参考音色。"
+            "声音模式":"选择视频是否生成声音；外部角色音色节点可提供指定人物的参考音色。",
+            "显存预留GB":"0自动：Windows低显存模式下，为20GB及以下显卡预留至少3GB，减少共享显存回退。可手动设置0～12GB；只在当前镜头生效，结束后恢复原预算。"
         })[name] || name;
         control.dataset.h3Help=control.title;
         if (control.type !== "checkbox") control.value = String(widget.value ?? "");
@@ -2431,6 +2479,11 @@ function setupStudio(node,nodeData) {
         configControls.set(name,control);configFields.set(name,field); field.append(control);if(name!=="画幅")(visibleBasics.has(name)?basicGrid:configGrid).append(field);
     }
     for(const name of["生成档位","镜头衔接","启用加速LoRA","加速权重","加速步数","执行范围","完成后","自定义宽度","自定义高度"]){const field=configFields.get(name);if(field)basicGrid.append(field);}
+    const acceleration=el('section','h3-video-acceleration'),accelerationGrid=el('div','h3-config');acceleration.append(el('strong','','视频加速'),accelerationGrid);
+    for(const name of ['启用加速LoRA','加速权重','加速LoRA档位','加速步数']){const field=configFields.get(name);if(field)accelerationGrid.append(field);}
+    const stepPresets=el('div','h3-row');stepPresets.append(el('span','h3-muted','步数预设'));
+    for(const preset of [4,8]){const button=el('button','',String(preset));button.type='button';button.onclick=()=>{if(value('加速权重')==='Pika H3 Flex · 6步')return;writeSetting('加速LoRA档位',preset);writeSetting('加速步数',preset);};stepPresets.append(button);}
+    acceleration.append(stepPresets);basicGrid.before(acceleration);
     // This workspace owns one live DOM tree. Comfy's parameter inspector also
     // mounts DOM widgets and writes their measured width back to the widget;
     // rendering this tree there would shrink the canvas to the sidebar width.
@@ -2502,7 +2555,7 @@ function setupStudio(node,nodeData) {
             clearManualDrag();stopVideo(video); stopVideo(finalVideo);stopVideo(allSceneVideo);root.remove();delete node.h3ManualStoryboard; delete node._h3Studio;
         },
     };
-    node.h3ManualStoryboard={setImages:setManualImages,getReferences:()=>references.map(item=>({...item})),isManualMode,refresh:()=>{renderPreview();notifyManualMode();},getSelectedSlot:()=>selected};
+    node.h3ManualStoryboard={setImages:setManualImages,getReferences:()=>isTextVideo()?[]:references.map(item=>({...item})),isManualMode:()=>isManualMode()||isTextVideo(),refresh:()=>{renderPreview();notifyManualMode();},getSelectedSlot:()=>selected};
     const keepPlanHelp="首次运行只规划；编辑后继续运行复用计划，不再调用AI。原稿、参考图或时长变化后需重新规划。";
     keepPlanLabel.title=keepPlanHelp;keepPlanToggle.title=keepPlanHelp;
     for(const[mode,button]of modeButtons.map((button,index)=>[MODES[index],button]))button.title=mode+"："+({
@@ -2535,17 +2588,19 @@ app.registerExtension({
         app.queuePrompt=async function(){const nodes=(app.graph?._nodes||[]).filter(node=>node.type===TYPE&&node.mode!==2&&node.mode!==4);for(const node of nodes)if(node._h3Studio?.prepareReferences()===false)return false;for(const node of nodes){node._h3Studio?.prepareSeed();node._h3Studio?.armExecution();}return queuePrompt.apply(this,arguments);};
     },
     beforeRegisterNodeDef(nodeType,nodeData) {
+        if(CONFIG_TYPES.has(nodeData.name)||nodeData.name===TYPE)rememberModelSchema(nodeData);
+        if(CONFIG_TYPES.has(nodeData.name)||nodeData.name===TYPE)installSettingsSerialization(nodeType,nodeData);
         if(CONFIG_TYPES.has(nodeData.name)){
-            const compact=node=>{const computed=node.computeSize?.();if(computed?.[1]>0)node.setSize([node.size?.[0]||computed[0],computed[1]]);colorH3Connections(app,node);};
+            const compact=node=>{ensureModelWidgets(node);const computed=node.computeSize?.();if(computed?.[1]>0)node.setSize([node.size?.[0]||computed[0],computed[1]]);colorH3Connections(app,node);};
             const created=nodeType.prototype.onNodeCreated;nodeType.prototype.onNodeCreated=function(){const result=created?.apply(this,arguments);compact(this);return result;};
-            const configured=nodeType.prototype.onConfigure;nodeType.prototype.onConfigure=function(){const result=configured?.apply(this,arguments);if(nodeData.name==="H3ImageModelSettings")restoreAddedWidgetValues(this,arguments[0],true);compact(this);return result;};
+            const configured=nodeType.prototype.onConfigure;nodeType.prototype.onConfigure=function(){const result=configured?.apply(this,arguments);ensureModelWidgets(this,arguments[0]);if(nodeData.name==="H3ImageModelSettings")restoreAddedWidgetValues(this,arguments[0],true);compact(this);return result;};
             return;
         }
         if (nodeData.name !== TYPE) return;
         const created = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {const result = created?.apply(this,arguments);suppressNativePreviews(this);isolateNativeAssetDrawing(this);setupStudio(this,nodeData); return result;};
         const configured = nodeType.prototype.onConfigure;
-        nodeType.prototype.onConfigure = function () {const result = configured?.apply(this,arguments);restoreAddedWidgetValues(this,arguments[0]);suppressNativePreviews(this);this._h3Studio?.sync();this._h3Studio?.restoreLayout(); return result;};
+        nodeType.prototype.onConfigure = function () {const result = configured?.apply(this,arguments);ensureModelWidgets(this,arguments[0]);restoreAddedWidgetValues(this,arguments[0]);suppressNativePreviews(this);this._h3Studio?.sync();this._h3Studio?.restoreLayout(); return result;};
         const connected=nodeType.prototype.onConnectionsChange;
         nodeType.prototype.onConnectionsChange=function(){const result=connected?.apply(this,arguments);this._h3Studio?.connectionsChanged();return result;};
         const executed = nodeType.prototype.onExecuted;

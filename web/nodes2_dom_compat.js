@@ -97,7 +97,9 @@ function update(node, requested) {
     return !widget || (!widget.hidden && widget.options?.hidden !== true);
   }).length : node.inputs?.length || 0;
   const sockets = Math.max(inputRows, node.outputs?.length || 0);
-  const reserve = h3Workspace ? Math.max(75, 35 + visibleNative * 28 + sockets * 20) : Math.max(75, 35 + visibleNative * 28 + sockets * 10);
+  let reserve = h3Workspace ? Math.max(75, 35 + visibleNative * 28 + sockets * 20) : Math.max(75, 35 + visibleNative * 28 + sockets * 10);
+  const host = state.widgets[0]?.element.closest?.('[data-node-id]');
+  reserve = state.vueReserve ?? reserve;
   const flexible = state.widgets.filter(item => item.fixed == null);
   const minimums = flexible.map(item => readHeight(item.options.getMinHeight, item.minimum));
   const fixedHeight = state.widgets.reduce((sum, item) => sum + (item.fixed || 0), 0);
@@ -107,7 +109,13 @@ function update(node, requested) {
     const maximum = readHeight(item.options.getMaxHeight, Infinity);
     const index = flexible.indexOf(item);
     const height = item.fixed != null ? readHeight(item.options.getMinHeight, item.fixed) : Math.max(minimum, Math.min(maximum, minimum + (index >= 0 ? extra / flexible.length : 0)));
-    const value = `${Math.round(height)}px`;
+    // Vue's corner resizer temporarily sets --node-height to 0 to measure the
+    // minimum content height. A saved pixel height here makes that measurement
+    // include the old workspace, so every drag can only grow the node. Follow
+    // the inherited graph height while retaining a pixel fallback for canvas.
+    const available = `calc((var(--node-height, ${Math.round(state.height)}px) - ${reserve + fixedHeight + minimums.reduce((a, b) => a + b, 0)}px) / ${flexible.length || 1} + ${minimum}px)`;
+    const value = item.fixed != null ? `${Math.round(height)}px`
+      : `max(${minimum}px, ${Number.isFinite(maximum) ? `min(${maximum}px, ${available})` : available})`;
     // Important prevents WidgetDOM's `*:flex-1` from expanding this panel to
     // its entire intrinsic content. Existing panel columns keep their scroll.
     item.element.style.setProperty('height', value, 'important');
@@ -117,6 +125,17 @@ function update(node, requested) {
     item.element.style.setProperty('box-sizing', 'border-box');
     item.element.style.setProperty('overflow', 'auto');
     item.element.dataset.bbaigcBoundedPanel = 'true';
+  }
+  if (host?.isConnected && state.vueReserve == null) {
+    const saved = host.style.getPropertyValue('--node-height');
+    // Measure only Vue's sockets, title, padding and widget gaps after the
+    // bounded styles exist. Removing its saved minimum prevents blank node
+    // space from being mistaken for chrome and keeping the panel small.
+    host.style.setProperty('--node-height', '0px');
+    const panelHeight = state.widgets.reduce((sum, item) => sum + item.element.offsetHeight, 0);
+    state.vueReserve = Math.max(reserve, host.offsetHeight - panelHeight);
+    host.style.setProperty('--node-height', saved);
+    if (state.vueReserve !== reserve) update(node, requested);
   }
 }
 
@@ -172,13 +191,37 @@ function bind(node, widget, element, options, kind) {
   const max = readHeight(options.getMaxHeight, Infinity);
   const fixed = (max === minimum && max < Infinity) ? minimum : ({ 'h3-voices': 440, 'h3-rules': 1180 })[kind] ?? null;
   state.widgets.push({ widget, element, options, kind, minimum, fixed });
+  state.vueReserve = null;
   update(node);
   schedule(node);
+}
+
+function focusWorkspace(graph) {
+  if (!graph || app.graph !== graph || !app.canvas?.canvas) return;
+  const nodes = graph._nodes || [];
+  const h3 = nodes.find(node => node.type === 'H3StoryboardStudio' && !node.flags?.collapsed);
+  const imageTypes = new Set(['CodexQwenStudioControls', 'CodexQwenStudioReferences', 'CodexQwenStudioPrompt', 'CodexQwenStudioResults']);
+  const image = nodes.filter(node => imageTypes.has(node.type) && !node.flags?.collapsed);
+  // Only the two integrated workspaces own their opening view. Leave ordinary
+  // graphs, backend nodes and every saved collapsed flag untouched.
+  const panels = h3 ? [h3] : image.length === imageTypes.size ? image : [];
+  if (!panels.length) return;
+  const left = Math.min(...panels.map(node => node.pos[0]));
+  const top = Math.min(...panels.map(node => node.pos[1] - 30));
+  const right = Math.max(...panels.map(node => node.pos[0] + node.size[0]));
+  const bottom = Math.max(...panels.map(node => node.pos[1] + node.size[1]));
+  app.canvas.ds.fitToBounds([left - 35, top - 35, right - left + 70, bottom - top + 70], { zoom: 0.9 });
+  app.canvas.setDirty(true, true);
 }
 
 app.registerExtension({
   name: 'BBAIGC.Nodes2DOMCompatibility',
   setup: installControlScrolling,
+  afterConfigureGraph() {
+    const graph = app.graph;
+    // Native loading restores the saved camera after configuration callbacks.
+    requestAnimationFrame(() => requestAnimationFrame(() => focusWorkspace(graph)));
+  },
   beforeRegisterNodeDef(type, data) {
     if (!OWN_NODE.test(data.name)) return;
     const add = type.prototype.addDOMWidget;

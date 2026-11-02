@@ -7,6 +7,7 @@ image; the H3 caller must release its own bundle before entering this helper.
 from __future__ import annotations
 
 import inspect
+import json
 from contextlib import contextmanager
 import logging
 import math
@@ -30,7 +31,48 @@ DEFAULT_SETTINGS = {"model": MODEL, "clip": ENCODER, "vae": VAE,
                     "steps": 25, "cfg": 1.0, "sampler": "euler", "scheduler": "simple",
                     "denoise": 1.0, "cache_device": "auto", "cache_dtype": "default",
                     "clip_device": "default", "storyboard_long_edge": 2048,
-                    "previous_reference_policy": PREVIOUS_REFERENCE_POLICIES[0], "reference_long_edge": 0}
+                    "previous_reference_policy": PREVIOUS_REFERENCE_POLICIES[0], "reference_long_edge": 0,
+                    "loras": []}
+
+
+def image_loras(raw):
+    """Separate image-model slots; disabled slots never load or validate a weight."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError as exc:
+            raise ValueError("图像LoRA配置应为JSON数组。") from exc
+    if not isinstance(raw, list) or len(raw) > 20:
+        raise ValueError("图像LoRA最多20个槽位。")
+    result = []
+    for item in raw:
+        if not isinstance(item, dict) or type(item.get("enabled", False)) is not bool:
+            raise ValueError("图像LoRA启用状态无效。")
+        if not item.get("enabled", False):
+            continue
+        strength = item.get("strength", 1)
+        if isinstance(strength, bool) or not isinstance(strength, (int, float)) or not math.isfinite(strength) or not -4 <= strength <= 4:
+            raise ValueError("图像LoRA强度应在-4～4之间。")
+        if not strength:
+            continue
+        name = item.get("name", "")
+        if name not in folder_paths.get_filename_list("loras"):
+            raise ValueError("未找到启用的图像LoRA，请重新选择。")
+        from safetensors import safe_open
+        path = folder_paths.get_full_path("loras", name)
+        try:
+            with safe_open(path, framework="pt", device="cpu") as source:
+                keys = list(source.keys())
+                compatible = any(("transformer_blocks" in key and ("attn.to_k" in key or "attn_to_k" in key))
+                                 and 4096 in source.get_slice(key).get_shape() for key in keys)
+        except Exception as exc:
+            raise ValueError("图像LoRA应为可读取的safetensors权重。") from exc
+        if not compatible:
+            raise ValueError("所选图像LoRA未识别为Qwen-Image架构；请勿使用H3、Flux或SD权重。")
+        from .video_lora import sampling_profile
+        result.append({"enabled": True, "name": name, "strength": float(strength),
+                       **sampling_profile(item, default_steps=25)})
+    return result
 
 
 def _outputs(value):
@@ -39,6 +81,25 @@ def _outputs(value):
     if isinstance(value, dict) and "result" in value:
         return value["result"]
     return value
+
+
+def refine_image_lora_slots(model, positive, negative, latent, slots, seed, settings):
+    """Run enabled per-slot sampling profiles after the combined-LoRA base pass."""
+    from .image_sampling import sample_image2
+    from .video_lora import sampling_profile
+    import comfy.model_management as mm
+    receipts = []
+    for index, slot in enumerate(slots):
+        if not slot.get("enabled") or not slot.get("strength", 0) or not any(key in slot for key in ("steps", "cfg")):
+            continue
+        mm.throw_exception_if_processing_interrupted()
+        profile = sampling_profile(slot, default_steps=25)
+        latent = sample_image2(model=model, seed=int(seed) + 300003 + index,
+            steps=profile["steps"], cfg=profile["cfg"], sampler=settings["sampler"],
+            scheduler=settings["scheduler"], positive=positive, negative=negative, latent=latent,
+            denoise=.25, model_name=settings["model"])[0]
+        receipts.append({"name": slot["name"], **profile, "denoise": .25, "combined_loras": True})
+    return latent, receipts
 
 
 def _class(name):
@@ -52,6 +113,18 @@ def normalize_settings(settings=None):
     """Resolve defaults into serializable effective values, without loading weights."""
     if settings is not None and not isinstance(settings, dict):
         raise ValueError("Image2.1配置格式无效，请连接图片模型配置节点。")
+    if settings and settings.get("provider") == "bbapi":
+        allowed = {"provider", "profile", "base_url", "model", "timeout", "resolution", "quality", "storyboard_long_edge"}
+        if set(settings) - allowed:
+            raise ValueError("云端图像不接受本地采样或LoRA参数。")
+        values = {"provider": "bbapi", "profile": "bbapi-main", "base_url": "https://bbapi.ainivox.cn",
+                  "model": "", "resolution": "1K", "quality": "low", "storyboard_long_edge": 2048, **settings}
+        if values["resolution"] not in ("1K", "2K", "4K") or values["quality"] not in ("low", "medium", "high", "auto"):
+            raise ValueError("请选择有效的云端图像分辨率与质量。")
+        edge = values["storyboard_long_edge"]
+        if type(edge) is not int or not 0 <= edge <= 4096 or edge % 32:
+            raise ValueError("分镜图长边应为0～4096的32倍数。")
+        return values
     values = dict(DEFAULT_SETTINGS)
     if settings:
         unknown = set(settings) - set(DEFAULT_SETTINGS)
@@ -95,6 +168,7 @@ def normalize_settings(settings=None):
     if (not isinstance(values["previous_reference_policy"], str) or
             values["previous_reference_policy"] not in PREVIOUS_REFERENCE_POLICIES):
         raise ValueError("上镜参考策略无效，请选择完整参考或结构参考。")
+    values["loras"] = image_loras(values["loras"])
     return values
 
 
@@ -165,6 +239,10 @@ def _read_image(filename, max_long_edge=2048):
 def validate_image_backend(settings=None):
     """Cheap preflight: no GPU initialization or model loading."""
     values = normalize_settings(settings)
+    if values.get("provider") == "bbapi":
+        from .cloud_bridge import validate_cloud
+        validate_cloud(values)
+        return {**values, "encoder": "API", "max_references": MAX_REFERENCES}
     _check_weights(values)
     return {**values, "encoder": values["clip"], "max_references": MAX_REFERENCES}
 
@@ -285,7 +363,8 @@ encoder's 16-image maximum. H3 consumes the resulting one first frame.
     from PIL import Image
 
     settings = normalize_settings(settings)
-    _check_weights(settings)
+    if settings.get("provider") != "bbapi":
+        _check_weights(settings)
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("分镜图片提示词为空，请先完成分镜规划。")
     width, height = int(width), int(height)
@@ -308,6 +387,9 @@ encoder's 16-image maximum. H3 consumes the resulting one first frame.
     if len(paths) > MAX_REFERENCES:
         raise ValueError(f"Qwen2.1 每镜最多接入{MAX_REFERENCES}张参考图，请减少本镜引用。")
     encoded_prompt = reference_role_prompt(prompt, len(paths), reference_roles) if paths else prompt
+    if settings.get("provider") == "bbapi":
+        from .cloud_bridge import generate_image
+        return generate_image(encoded_prompt, paths, width, height, settings, progress_callback)
     handles = {}
     pixels = None
     try:
@@ -317,6 +399,9 @@ encoder's 16-image maximum. H3 consumes the resulting one first frame.
             handles["model"] = _class("UnetLoaderGGUF")().load_unet(settings["model"])[0]
         else:
             handles["model"] = nodes.UNETLoader().load_unet(settings["model"], "default")[0]
+        for slot in settings["loras"]:
+            handles["model"] = nodes.LoraLoaderModelOnly().load_lora_model_only(
+                handles["model"], slot["name"], slot["strength"])[0]
         handles["model"] = _outputs(_class("QwenImage21Cache").execute(
             model=handles["model"], device=settings["cache_device"], dtype=settings["cache_dtype"]))[0]
         handles["clip"] = nodes.CLIPLoader().load_clip(settings["clip"], "qwen_image", settings["clip_device"])[0]
@@ -385,6 +470,11 @@ encoder's 16-image maximum. H3 consumes the resulting one first frame.
                 sampler=settings["sampler"], scheduler=settings["scheduler"], positive=handles["encoded"][0],
                 negative=handles["encoded"][1], latent=handles["latent"], denoise=settings["denoise"],
                 model_name=settings["model"])[0]
+            handles["sample"], lora_refinement = refine_image_lora_slots(
+                handles["model"], handles["encoded"][0], handles["encoded"][1], handles["sample"],
+                settings["loras"], int(seed), settings)
+            if lora_refinement:
+                _notify_progress(progress_callback, "sampling", lora_refinement=lora_refinement)
         _notify_progress(progress_callback, "decoding")
         handles["decoded"] = nodes.VAEDecode().decode(handles["vae"], handles["sample"])[0]
         pixels = (handles["decoded"][0].detach().to(device="cpu", dtype=torch.float32)

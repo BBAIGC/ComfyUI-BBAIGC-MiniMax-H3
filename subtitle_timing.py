@@ -5,7 +5,7 @@ import math
 import re
 
 
-TIMING_VERSION = 2
+TIMING_VERSION = 3
 CAPTION_CHARS = 10
 _TOKENS = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*|[^\s]")
 _PUNCTUATION = re.compile(r"[。！？!?；;，,、：:.…]$")

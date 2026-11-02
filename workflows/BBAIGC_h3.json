@@ -1,5 +1,5 @@
 {
-  "revision": 5,
+  "revision": 0,
   "last_node_id": 43,
   "last_link_id": 601,
   "nodes": [
@@ -73,6 +73,46 @@
             "name": "重复惩罚"
           },
           "link": null
+        },
+        {
+          "name": "服务来源",
+          "type": "COMBO",
+          "widget": {
+            "name": "服务来源"
+          },
+          "link": null
+        },
+        {
+          "name": "API配置名称",
+          "type": "STRING",
+          "widget": {
+            "name": "API配置名称"
+          },
+          "link": null
+        },
+        {
+          "name": "API接口地址",
+          "type": "STRING",
+          "widget": {
+            "name": "API接口地址"
+          },
+          "link": null
+        },
+        {
+          "name": "API模型",
+          "type": "STRING",
+          "widget": {
+            "name": "API模型"
+          },
+          "link": null
+        },
+        {
+          "name": "API协议",
+          "type": "COMBO",
+          "widget": {
+            "name": "API协议"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -89,14 +129,9 @@
         }
       ],
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3TextModelSettings",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        },
-        "bbaigc_version": "1.2.25"
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0"
       },
       "widgets_values": [
         "qwen3.5:9b",
@@ -104,8 +139,26 @@
         32768,
         10000,
         0.9,
-        1.05
-      ]
+        1.05,
+        "本地模型",
+        "bbapi-main",
+        "https://bbapi.ainivox.cn",
+        "",
+        "自动"
+      ],
+      "widgets_values_named": {
+        "模型": "qwen3.5:9b",
+        "温度": 0.1,
+        "上下文长度": 32768,
+        "输出上限": 10000,
+        "top_p": 0.9,
+        "重复惩罚": 1.05,
+        "服务来源": "本地模型",
+        "API配置名称": "bbapi-main",
+        "API接口地址": "https://bbapi.ainivox.cn",
+        "API模型": "",
+        "API协议": "自动"
+      }
     },
     {
       "id": 2,
@@ -252,6 +305,62 @@
             "name": "参考读取长边"
           },
           "link": null
+        },
+        {
+          "name": "服务来源",
+          "type": "COMBO",
+          "widget": {
+            "name": "服务来源"
+          },
+          "link": null
+        },
+        {
+          "name": "API配置名称",
+          "type": "STRING",
+          "widget": {
+            "name": "API配置名称"
+          },
+          "link": null
+        },
+        {
+          "name": "API接口地址",
+          "type": "STRING",
+          "widget": {
+            "name": "API接口地址"
+          },
+          "link": null
+        },
+        {
+          "name": "API模型",
+          "type": "STRING",
+          "widget": {
+            "name": "API模型"
+          },
+          "link": null
+        },
+        {
+          "name": "API分辨率",
+          "type": "COMBO",
+          "widget": {
+            "name": "API分辨率"
+          },
+          "link": null
+        },
+        {
+          "name": "API质量",
+          "type": "COMBO",
+          "widget": {
+            "name": "API质量"
+          },
+          "link": null
+        },
+        {
+          "name": "图像LoRA",
+          "type": "STRING",
+          "widget": {
+            "name": "图像LoRA"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -269,15 +378,10 @@
       ],
       "title": "Image2.1 模型与采样",
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3ImageModelSettings",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        },
-        "bbaigc_version": "1.2.25",
-        "h3_image_long_edge": 2048
+        "h3_image_long_edge": 2048,
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0"
       },
       "widgets_values": [
         "qwen-image-2.1-UC-Q6_K.gguf",
@@ -293,8 +397,38 @@
         "default",
         2048,
         "结构参考（原图细节优先）",
-        2048
-      ]
+        2048,
+        "本地模型",
+        "bbapi-main",
+        "https://bbapi.ainivox.cn",
+        "",
+        "1K",
+        "low",
+        "[]"
+      ],
+      "widgets_values_named": {
+        "图像模型": "qwen-image-2.1-UC-Q6_K.gguf",
+        "文本编码器": "qwen3vl_8b_int8_convrot.safetensors",
+        "VAE": "qwen_image_2.1_vae_bf16.safetensors",
+        "步数": 25,
+        "CFG": 1,
+        "采样器": "euler",
+        "调度器": "simple",
+        "去噪": 1,
+        "缓存设备": "auto",
+        "缓存精度": "default",
+        "编码器设备": "default",
+        "分镜图长边": 2048,
+        "上镜参考策略": "结构参考（原图细节优先）",
+        "参考读取长边": 2048,
+        "服务来源": "本地模型",
+        "API配置名称": "bbapi-main",
+        "API接口地址": "https://bbapi.ainivox.cn",
+        "API模型": "",
+        "API分辨率": "1K",
+        "API质量": "low",
+        "图像LoRA": "[]"
+      }
     },
     {
       "id": 3,
@@ -411,7 +545,7 @@
         {
           "localized_name": "加速步数",
           "name": "加速步数",
-          "type": "COMBO",
+          "type": "INT",
           "widget": {
             "name": "加速步数"
           },
@@ -461,6 +595,46 @@
             "name": "视频调度器"
           },
           "link": null
+        },
+        {
+          "name": "PikaLoRA",
+          "type": "COMBO",
+          "widget": {
+            "name": "PikaLoRA"
+          },
+          "link": null
+        },
+        {
+          "name": "视频LoRA",
+          "type": "STRING",
+          "widget": {
+            "name": "视频LoRA"
+          },
+          "link": null
+        },
+        {
+          "name": "视频精修",
+          "type": "STRING",
+          "widget": {
+            "name": "视频精修"
+          },
+          "link": null
+        },
+        {
+          "name": "显存预留GB",
+          "type": "FLOAT",
+          "widget": {
+            "name": "显存预留GB"
+          },
+          "link": null
+        },
+        {
+          "name": "加速LoRA档位",
+          "type": "COMBO",
+          "widget": {
+            "name": "加速LoRA档位"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -477,14 +651,9 @@
         }
       ],
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3VideoModelSettings",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        },
-        "bbaigc_version": "1.2.25"
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0"
       },
       "widgets_values": [
         "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
@@ -494,15 +663,42 @@
         "minimax_h3_audio_vae_fp32.safetensors",
         "未选用（无需下载）",
         "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
-        false,
+        true,
         "独立LoRA",
         8,
         20,
         true,
         false,
         "res_multistep",
-        "simple"
-      ]
+        "simple",
+        "未选用（无需下载）",
+        "[]",
+        "{}",
+        0,
+        8
+      ],
+      "widgets_values_named": {
+        "基础模型": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "原作者模型": "未选用（无需下载）",
+        "文本编码器": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "视频VAE": "minimax_h3_video_vae_int8_convrot.safetensors",
+        "音频VAE": "minimax_h3_audio_vae_fp32.safetensors",
+        "4步LoRA": "未选用（无需下载）",
+        "8步LoRA": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "启用加速LoRA": true,
+        "加速权重": "独立LoRA",
+        "加速步数": 8,
+        "标准步数": 20,
+        "低显存": true,
+        "稀疏注意力": false,
+        "视频采样器": "res_multistep",
+        "视频调度器": "simple",
+        "PikaLoRA": "未选用（无需下载）",
+        "视频LoRA": "[]",
+        "视频精修": "{}",
+        "显存预留GB": 0,
+        "加速LoRA档位": 8
+      }
     },
     {
       "id": 4,
@@ -588,15 +784,10 @@
         }
       ],
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3PromptRules",
         "h3_prompt_rules_locked": false,
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        },
-        "bbaigc_version": "1.2.25"
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0"
       },
       "widgets_values": [
         "通读完整原稿，按事件先后和各镜时长拆分镜头；每镜只安排本镜的新事件，不把整篇剧情重复到每一镜。对白与触发它的动作一起安排，原句少于镜头数时，将有对白的剧情节点自然分布到开头、中段和后段，避免前面连续说完、后面长时间空镜；原稿明确的静默、时间点和剧情因果优先，不机械平均、不新增或重复台词。静默镜头有明确叙事作用，不为填满时长擅加人物、剧情或镜头动作。",
@@ -604,33 +795,16 @@
         "人物身份连续，衣物、姿态、表情、手持物及道具位置随剧情更新。后镜从前镜结束状态继续，未改变的实体逐项保留，已完成事件保持其结果，不恢复初始状态再做一遍。姿态变化只按原稿真实发生；不能因为动作元数据遗漏就把明确的起身、坐下或休息姿态锁回旧姿态。每镜聚焦一个主要动作，原稿要求的次要动作按顺序轻柔衔接；手部接触写清哪只手、接触位置和前后关系，避免多只手同时交叉或道具穿插，不为丰富画面额外加大动作。",
         "保留每张素材图的独立来源和角色；同一镜可把不同素材中的人物或物体按原稿组合，不能把编号互换或只看第一张。原图提供稳定身份、皮肤纹理和材质细节，上一分镜只补几何和状态连续性，不能把上一分镜当成新的清晰度或磨皮标准。独立规划每镜静态构图、景别和视角；在原稿允许的镜头语言内体现眼神、表情、手的位置和身体朝向变化，构图不能恢复旧衣着或未来动作。连续长镜头保持同一机位移动轨迹，不凭空切换景别或角度。",
         "用简洁中文描述画面、当前状态、本镜新动作、表情和镜头运动。逐字对白只从指定白名单回填，声音属于对应的可见说话人，发声时自然开口；不擅加背景人声。保留原有环境音和配乐选择，跨镜继承已完成状态。",
-        "先根据剧情中已完成的事件落实本镜开场状态：例如帽子已摘下放在桌上、外套已挂好、杯子在手中或已放回，分别写清穿戴层次、物件位置与持有状态；未发生的变化不要提前表现。生成这个开场瞬间的一张静态图，再应用该镜景别、机位和布局。原素材只提供身份、材质、环境与细节，不恢复过期状态。保持原图自然皮肤纹理、发丝及衣料细节，不逐镜磨皮。手与物体接触边界、遮挡关系和人体比例自然，不表现多次手势，不写S编号、对白、帧率、镜头移动或晃动，不拼图或添加字幕。",
-        "",
-        [
-          false,
-          true
-        ],
-        [
-          false,
-          true
-        ],
-        [
-          false,
-          true
-        ],
-        [
-          false,
-          true
-        ],
-        [
-          false,
-          true
-        ],
-        [
-          false,
-          true
-        ]
-      ]
+        "先根据剧情中已完成的事件落实本镜开场状态：例如帽子已摘下放在桌上、外套已挂好、杯子在手中或已放回，分别写清穿戴层次、物件位置与持有状态；未发生的变化不要提前表现。生成这个开场瞬间的一张静态图，再应用该镜景别、机位和布局。原素材只提供身份、材质、环境与细节，不恢复过期状态。保持原图自然皮肤纹理、发丝及衣料细节，不逐镜磨皮。手与物体接触边界、遮挡关系和人体比例自然，不表现多次手势，不写S编号、对白、帧率、镜头移动或晃动，不拼图或添加字幕。"
+      ],
+      "widgets_values_named": {
+        "分镜规划规则": "通读完整原稿，按事件先后和各镜时长拆分镜头；每镜只安排本镜的新事件，不把整篇剧情重复到每一镜。对白与触发它的动作一起安排，原句少于镜头数时，将有对白的剧情节点自然分布到开头、中段和后段，避免前面连续说完、后面长时间空镜；原稿明确的静默、时间点和剧情因果优先，不机械平均、不新增或重复台词。静默镜头有明确叙事作用，不为填满时长擅加人物、剧情或镜头动作。",
+        "环境与光照规则": "环境、光线和色彩以主参考图为准。未明确要求改变的部分保持原样，不额外补写光效、色调或曝光；后镜只继承前镜的动作状态，画面色彩始终参考原图。",
+        "动作与状态规则": "人物身份连续，衣物、姿态、表情、手持物及道具位置随剧情更新。后镜从前镜结束状态继续，未改变的实体逐项保留，已完成事件保持其结果，不恢复初始状态再做一遍。姿态变化只按原稿真实发生；不能因为动作元数据遗漏就把明确的起身、坐下或休息姿态锁回旧姿态。每镜聚焦一个主要动作，原稿要求的次要动作按顺序轻柔衔接；手部接触写清哪只手、接触位置和前后关系，避免多只手同时交叉或道具穿插，不为丰富画面额外加大动作。",
+        "多图与构图规则": "保留每张素材图的独立来源和角色；同一镜可把不同素材中的人物或物体按原稿组合，不能把编号互换或只看第一张。原图提供稳定身份、皮肤纹理和材质细节，上一分镜只补几何和状态连续性，不能把上一分镜当成新的清晰度或磨皮标准。独立规划每镜静态构图、景别和视角；在原稿允许的镜头语言内体现眼神、表情、手的位置和身体朝向变化，构图不能恢复旧衣着或未来动作。连续长镜头保持同一机位移动轨迹，不凭空切换景别或角度。",
+        "视频提示词规则": "用简洁中文描述画面、当前状态、本镜新动作、表情和镜头运动。逐字对白只从指定白名单回填，声音属于对应的可见说话人，发声时自然开口；不擅加背景人声。保留原有环境音和配乐选择，跨镜继承已完成状态。",
+        "生图提示词规则": "先根据剧情中已完成的事件落实本镜开场状态：例如帽子已摘下放在桌上、外套已挂好、杯子在手中或已放回，分别写清穿戴层次、物件位置与持有状态；未发生的变化不要提前表现。生成这个开场瞬间的一张静态图，再应用该镜景别、机位和布局。原素材只提供身份、材质、环境与细节，不恢复过期状态。保持原图自然皮肤纹理、发丝及衣料细节，不逐镜磨皮。手与物体接触边界、遮挡关系和人体比例自然，不表现多次手势，不写S编号、对白、帧率、镜头移动或晃动，不拼图或添加字幕。"
+      }
     },
     {
       "id": 5,
@@ -680,24 +854,18 @@
         }
       ],
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3VoiceLibrary",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        },
-        "bbaigc_version": "1.2.25"
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0"
       },
       "widgets_values": [
         "模型默认",
-        "{}",
-        "",
-        [
-          false,
-          true
-        ]
-      ]
+        "[]"
+      ],
+      "widgets_values_named": {
+        "模式": "模型默认",
+        "角色分配": "[]"
+      }
     },
     {
       "id": 6,
@@ -899,7 +1067,7 @@
         {
           "localized_name": "加速步数",
           "name": "加速步数",
-          "type": "COMBO",
+          "type": "INT",
           "widget": {
             "name": "加速步数"
           },
@@ -1194,6 +1362,54 @@
             "name": "视频输入"
           },
           "link": null
+        },
+        {
+          "name": "视频LoRA",
+          "type": "STRING",
+          "widget": {
+            "name": "视频LoRA"
+          },
+          "link": null
+        },
+        {
+          "name": "视频精修",
+          "type": "STRING",
+          "widget": {
+            "name": "视频精修"
+          },
+          "link": null
+        },
+        {
+          "name": "PikaLoRA",
+          "type": "STRING",
+          "widget": {
+            "name": "PikaLoRA"
+          },
+          "link": null
+        },
+        {
+          "name": "文生视频连续衔接",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "文生视频连续衔接"
+          },
+          "link": null
+        },
+        {
+          "name": "显存预留GB",
+          "type": "FLOAT",
+          "widget": {
+            "name": "显存预留GB"
+          },
+          "link": null
+        },
+        {
+          "name": "加速LoRA档位",
+          "type": "COMBO",
+          "widget": {
+            "name": "加速LoRA档位"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -1216,29 +1432,24 @@
           ]
         }
       ],
-      "title": "小陈 MiniMax H3 多分镜工作台 V1.2.25",
+      "title": "小陈 MiniMax H3 多分镜工作台",
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3StoryboardStudio",
-        "h3_advanced_open": true,
-        "h3_advanced_compact_version": "1.2.22",
-        "h3_director_version": "1.2.25",
-        "h3_ref_serial": 1,
         "h3_director_layout": "horizontal",
         "h3_panel_height": 1022.07720352348,
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        },
-        "h3_auto_video": false,
-        "bbaigc_version": "1.2.25",
-        "h3_seed_mode": "random",
-        "h3_image_seed_mode": "random",
-        "h3_video_seed": 42,
+        "h3_director_preview_mode": "all",
         "h3_image_long_edge": 2048,
+        "h3_reference_long_edge": 2048,
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0",
+        "h3_advanced_open": false,
+        "h3_advanced_compact_version": "1.3.0",
+        "h3_director_version": "1.3.0",
+        "h3_ref_serial": 0,
+        "h3_auto_video": false,
         "h3_video_input": "图生视频",
-        "h3_reference_long_edge": 2048
+        "h3_seed_mode": "random",
+        "h3_image_seed_mode": "random"
       },
       "widgets_values": [
         "",
@@ -1255,7 +1466,7 @@
         "亮度轻校正",
         "qwen3.5:9b",
         "自动识别原稿",
-        false,
+        true,
         "独立LoRA",
         8,
         20,
@@ -1268,7 +1479,7 @@
         0,
         "{}",
         "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
-        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
         "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
         "minimax_h3_video_vae_int8_convrot.safetensors",
         "minimax_h3_audio_vae_fp32.safetensors",
@@ -1280,7 +1491,7 @@
         16,
         "图1",
         "[]",
-        "",
+        "{}",
         "工作台格式",
         2048,
         2048,
@@ -1289,15 +1500,69 @@
         false,
         42,
         "图生视频",
-        [
-          false,
-          true
-        ],
-        [
-          false,
-          true
-        ]
-      ]
+        "[]",
+        "{}",
+        "pika_h3_flex_fl2va_v1_bf16.safetensors",
+        true,
+        0,
+        8
+      ],
+      "widgets_values_named": {
+        "剧本": "",
+        "参考图集": "[]",
+        "生成模式": "AI生成分镜",
+        "镜头衔接": "首尾帧约束",
+        "分镜数量": 2,
+        "每镜秒数": "8,8",
+        "画幅": "跟随图片",
+        "生成档位": "480P",
+        "自定义宽度": 640,
+        "自定义高度": 384,
+        "适配方式": "等比补边",
+        "末帧处理": "亮度轻校正",
+        "语言模型": "qwen3.5:9b",
+        "声音模式": "自动识别原稿",
+        "启用加速LoRA": true,
+        "加速权重": "独立LoRA",
+        "加速步数": 8,
+        "标准步数": 20,
+        "随机种子": 42,
+        "低显存": true,
+        "稀疏注意力": false,
+        "完成后": "保留模型缓存",
+        "执行范围": "完整生成",
+        "继续任务": "",
+        "重做镜头": 0,
+        "分镜覆盖": "{}",
+        "基础模型": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "原作者模型": "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+        "文本编码器": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "视频VAE": "minimax_h3_video_vae_int8_convrot.safetensors",
+        "音频VAE": "minimax_h3_audio_vae_fp32.safetensors",
+        "保留分镜计划": true,
+        "计划编辑": "{}",
+        "生图重做范围": "保留现有图片",
+        "重生图片": "[]",
+        "时长模式": "手动设置",
+        "目标总秒数": 16,
+        "画幅参考图": "图1",
+        "手动分镜图片": "[]",
+        "导入优化计划": "{}",
+        "提示词格式": "工作台格式",
+        "分镜图长边": 2048,
+        "参考读取长边": 2048,
+        "衔接超分配置": "{}",
+        "视频短边上限": 0,
+        "生图后生成视频": false,
+        "视频种子": 42,
+        "视频输入": "图生视频",
+        "视频LoRA": "[]",
+        "视频精修": "{}",
+        "PikaLoRA": "pika_h3_flex_fl2va_v1_bf16.safetensors",
+        "文生视频连续衔接": true,
+        "显存预留GB": 0,
+        "加速LoRA档位": 8
+      }
     },
     {
       "id": 7,
@@ -1349,27 +1614,17 @@
       ],
       "title": "Image2.1 独立生图",
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3ManualImageStudio",
-        "h3_manual_last_source_enabled": false,
-        "h3_manual_source_id": "6",
-        "ue_properties": {
-          "widget_ue_connectable": {
-            "任务数据": true
-          },
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        },
-        "bbaigc_version": "1.2.25"
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0",
+        "h3_manual_source_id": "6"
       },
       "widgets_values": [
-        "{}",
-        "",
-        [
-          false,
-          true
-        ]
-      ]
+        "{}"
+      ],
+      "widgets_values_named": {
+        "任务数据": "{}"
+      }
     },
     {
       "id": 8,
@@ -1429,26 +1684,20 @@
         }
       ],
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3DialogueAudio",
-        "h3_dialogue_source_id": "6",
-        "ue_properties": {
-          "widget_ue_connectable": {
-            "启用": true,
-            "对白文件": true,
-            "配音数据": true
-          },
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        },
-        "bbaigc_version": "1.2.25",
-        "h3_dialogue_compact_version": "1.2.0"
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0"
       },
       "widgets_values": [
         false,
-        "",
+        "未选择音频",
         "{}"
-      ]
+      ],
+      "widgets_values_named": {
+        "启用": false,
+        "对白文件": "未选择音频",
+        "配音数据": "{}"
+      }
     },
     {
       "id": 30,
@@ -1581,25 +1830,9 @@
       ],
       "title": "可选字幕 · 默认关闭",
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3Subtitles",
-        "bbaigc_version": "1.2.25",
-        "ue_properties": {
-          "widget_ue_connectable": {
-            "启用字幕": true,
-            "执行步骤": true,
-            "识别语言": true,
-            "字体": true,
-            "字号": true,
-            "颜色": true,
-            "黑色描边": true,
-            "横向位置": true,
-            "纵向位置": true,
-            "编辑字幕": true
-          },
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0"
       },
       "widgets_values": [
         false,
@@ -1611,13 +1844,20 @@
         2,
         50,
         90,
-        "",
-        "",
-        [
-          false,
-          true
-        ]
-      ]
+        "{}"
+      ],
+      "widgets_values_named": {
+        "启用字幕": false,
+        "执行步骤": "识别并保存字幕视频",
+        "识别语言": "自动",
+        "字体": "Microsoft YaHei",
+        "字号": 36,
+        "颜色": "#ffffff",
+        "黑色描边": 2,
+        "横向位置": 50,
+        "纵向位置": 90,
+        "编辑字幕": "{}"
+      }
     },
     {
       "id": 31,
@@ -1689,28 +1929,20 @@
       ],
       "title": "不使用AI时的手动分镜模板",
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "H3ManualPlan",
-        "bbaigc_version": "1.2.25",
-        "ue_properties": {
-          "widget_ue_connectable": {
-            "手动分镜JSON": true,
-            "生成模式": true,
-            "声音模式": true
-          },
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0"
       },
       "widgets_values": [
         "{}",
         "AI生成分镜",
-        "自动识别原稿",
-        [
-          false,
-          true
-        ]
-      ]
+        "自动识别原稿"
+      ],
+      "widgets_values_named": {
+        "手动分镜JSON": "{}",
+        "生成模式": "AI生成分镜",
+        "声音模式": "自动识别原稿"
+      }
     },
     {
       "id": 40,
@@ -1728,17 +1960,14 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "BBAIGC 使用说明",
-      "properties": {
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
+      "title": "使用说明",
+      "properties": {},
       "widgets_values": [
-        "BBAIGC · 使用方法、模型目录与智能体安装提示词见仓库 README。"
+        "[查看使用说明](https://github.com/BBAIGC/ComfyUI-BBAIGC-MiniMax-H3/blob/main/docs/WORKBENCH_GUIDE.md)"
       ],
+      "widgets_values_named": {
+        "text": "可自由写剧本，也可按这个结构：\n参考图与一致性：@图1，指定人物、物体与环境来自哪张图。\n人物与场景：谁、哪里、时段、初始衣物与物件。\n事件和原话：按顺序写发生什么、变化后是什么状态；对白加引号。\n画面与声音：景别、拍摄方式、环境音、配乐是否需要。\n限制与结尾：哪些必须保持，最后停留还是继续动作。\n\n示例：@图1 成年人物先摘下帽子放桌上，说“下午好。”然后拿起杯子。后续帽子留在桌上。"
+      },
       "color": "#432",
       "bgcolor": "#653"
     },
@@ -1758,17 +1987,14 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "BBAIGC 使用说明",
-      "properties": {
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
+      "title": "使用说明",
+      "properties": {},
       "widgets_values": [
-        "BBAIGC · 使用方法、模型目录与智能体安装提示词见仓库 README。"
+        "[查看使用说明](https://github.com/BBAIGC/ComfyUI-BBAIGC-MiniMax-H3/blob/main/docs/WORKBENCH_GUIDE.md)"
       ],
+      "widgets_values_named": {
+        "text": "接近官方描述习惯，但仍是给规划器看的原始剧本：\n主体：成年人物，身份和外观参考@图1。\n环境：白天客厅，物体布局不变。\n动作：先摘帽，再拿杯，最后放回；把每个变化后的状态写清楚。\n镜头：近景或中景，是否连续拍摄。\n声音：指定对白原文、语气；是否允许环境音/音乐。\n结尾：最终停留位置和状态。\n\n这不是六段协议；可完全自由发挥或粘贴已有剧本。"
+      },
       "color": "#432",
       "bgcolor": "#653"
     },
@@ -1788,17 +2014,14 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "BBAIGC 使用说明",
-      "properties": {
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
+      "title": "使用说明",
+      "properties": {},
       "widgets_values": [
-        "BBAIGC · 使用方法、模型目录与智能体安装提示词见仓库 README。"
+        "[查看使用说明](https://github.com/BBAIGC/ComfyUI-BBAIGC-MiniMax-H3/blob/main/docs/WORKBENCH_GUIDE.md)"
       ],
+      "widgets_values_named": {
+        "text": "每镜填写：秒数 / 开场 / 画面 / 动作 / 结束 / 生图提示词 / 对白原话及镜头内起止秒。下一镜开场必须承接上一镜结束。\n\n静态图：只描述该镜开场一瞬间，包括已经摘下的帽子放在哪里；不写镜头晃动、对白、帧率。视频：描述本镜动作推进与逐字对白。\n\n无需AI：展开“手动分镜计划”填JSON，把三个输出接工作台的导入优化计划、剧本、每镜秒数；同步镜头数与手动总时长。不会调用千问。\n\n保留计划：首轮停在规划后。修改后继续，先完成待重生图片再生视频。运行中编辑保留到下一次继续，不改当前采样。\n\n原始剧本支持TXT/MD拖入。总览可导出JSON，包含原始剧本、完整分镜、生图提示词、时长与参考图编号；导入校验后下一次运行直接生图。生图后生成视频关闭时，先停在图片阶段，调整后点继续再生成视频。"
+      },
       "color": "#432",
       "bgcolor": "#653"
     },
@@ -1899,22 +2122,9 @@
         }
       ],
       "properties": {
-        "bbaigc_author": "BBAIGC",
         "Node name for S&R": "CodexSpeechInput",
-        "bbaigc_version": "1.2.25",
-        "ue_properties": {
-          "widget_ue_connectable": {
-            "启用识别": true,
-            "识别文字": true,
-            "音频文件": true,
-            "识别语言": true,
-            "数字规范": true,
-            "CPU线程": true,
-            "运行前卸载模型": true
-          },
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
+        "bbaigc_author": "BBAIGC",
+        "bbaigc_version": "1.3.0"
       },
       "widgets_values": [
         false,
@@ -1924,7 +2134,16 @@
         true,
         4,
         true
-      ]
+      ],
+      "widgets_values_named": {
+        "启用识别": false,
+        "识别文字": "",
+        "音频文件": "",
+        "识别语言": "自动",
+        "数字规范": true,
+        "CPU线程": 4,
+        "运行前卸载模型": true
+      }
     }
   ],
   "links": [
@@ -2009,20 +2228,20 @@
   ],
   "config": {},
   "extra": {
-    "h3_director_version": "1.2.25",
-    "ds": {
-      "scale": 0.7247295000000015,
-      "offset": [
-        839.9902914539169,
-        321.9121353047702
-      ]
-    },
-    "codex_version": "1.2.24",
+    "h3_director_version": "1.3.0",
+    "codex_version": "1.3.0",
     "bbaigc_author": "BBAIGC",
     "bbaigc_product": "h3",
-    "bbaigc_version": "1.2.25",
-    "workflowVersion": "1.2.25",
-    "bbaigc_public": true
+    "bbaigc_version": "1.3.0",
+    "workflowVersion": "1.3.0",
+    "bbaigc_public": true,
+    "ds": {
+      "scale": 0.55,
+      "offset": [
+        650,
+        180
+      ]
+    }
   },
   "version": 0.4
 }

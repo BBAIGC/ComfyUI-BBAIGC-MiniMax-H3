@@ -30,6 +30,50 @@ def is_continuous_take(raw_script):
     return bool(_CONTINUOUS.search(_NEGATED.sub("", raw_script)))
 
 
+def single_action_note(action, raw_script):
+    """Give a finite gesture an endpoint without adding another story event."""
+    clauses = []
+    for gesture, ending in (("点头", "头部自然回到舒适位置"),
+                            ("摇头", "头部自然回到舒适位置"),
+                            ("挥手", "手臂自然落回原位")):
+        if gesture not in str(action):
+            continue
+        if re.search(re.escape(gesture) + r"[^。；;]{0,20}(?:一次|一回|\bonce\b)|(?:一次|一回)[^。；;]{0,20}" +
+                     re.escape(gesture), str(action), re.I):
+            continue
+        if re.search(r"(?:反复|重复|不停|持续|一直|多次|连续)\s*(?:地|轻轻|微微)?" + gesture +
+                     "|" + gesture + r"\s*(?:[两二三四五六七八九十\d]+次|不止)", str(raw_script)):
+            continue
+        clauses.append(f"这个短动作只自然完成一次，随后{ending}，余下时间保持自然呼吸与眼神反应")
+    return "；".join(clauses) + "。" if clauses else ""
+
+
+def finite_gesture_timing(action, raw_script, seconds):
+    """Bound a source-backed short gesture to a single early motion interval.
+
+    Merely saying 'once' in an eight-second motion description can be interpreted
+    as an eight-second loop. A separate neutral remainder gives H3 an endpoint.
+    Explicit source repetition and explicit source timestamps remain untouched.
+    """
+    text = str(action)
+    if float(seconds) < 3 or re.search(r"\d+(?:\.\d+)?\s*(?:秒|s\b)", text, re.I):
+        return text
+    gesture = next((word for word in ('点头', '摇头', '挥手') if word in text), None)
+    place_cup = not gesture and '杯' in text and bool(re.search(r'放(?:到|在|稳|下|置)', text))
+    if not gesture and not place_cup:
+        return text
+    if gesture and re.search(r"(?:反复|重复|不停|持续|一直|多次|连续)[^。；;]{0,12}" + gesture +
+            "|" + gesture + r"\s*(?:[两二三四五六七八九十\d]+次|不止)", str(raw_script)):
+        return text
+    if place_cup and re.search(r'(?:反复|重复|多次|再次|重新)[^。；;]{0,16}放[^。；;]{0,12}杯', str(raw_script)):
+        return text
+    finish = min(2.0, float(seconds)/3)
+    resting = ('杯子静置桌面，原先放杯者的双臂放松停在身侧，保持自然目光与呼吸' if place_cup else
+               '头部回到自然中立位置，目光放松，保持自然呼吸与眨眼' if gesture in ('点头', '摇头')
+               else '手臂自然落在身侧，目光放松，保持自然呼吸与眨眼')
+    return f"第0.5至{finish:g}秒：{text} 第{finish:g}至{float(seconds):g}秒：{resting}。"
+
+
 def motion_continuity_note(raw_script, scene_index, scene_count, language="zh"):
     """Return one neutral video-body note; scene_index is zero based.
 

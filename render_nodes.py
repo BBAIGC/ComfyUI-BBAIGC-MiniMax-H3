@@ -96,8 +96,8 @@ class H3SamplingControl:
     def execute(self, **kwargs):
         if kwargs["启用加速"]:
             value = int(kwargs["加速步数"])
-            if value not in (4, 8):
-                raise ValueError("加速模式只支持对应LoRA的4步或8步。")
+            if not 1 <= value <= 100:
+                raise ValueError("加速采样步数应为1～100。")
             return (value,)
         return (max(20, int(kwargs["标准步数"])),)
 

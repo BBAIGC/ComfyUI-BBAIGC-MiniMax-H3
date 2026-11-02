@@ -4,24 +4,24 @@
 
 ### 一张参考图＋自由剧本，AI 全自动完成本地视频制作
 
-![版本](https://img.shields.io/badge/版本-V1.2.25-1677ff?style=flat-square)
+![版本](https://img.shields.io/badge/版本-V1.3.0-1677ff?style=flat-square)
 ![ComfyUI](https://img.shields.io/badge/ComfyUI-视频工作流-18181b?style=flat-square)
 ![MiniMax](https://img.shields.io/badge/MiniMax-H3-f59e0b?style=flat-square)
 ![Ollama](https://img.shields.io/badge/Ollama-分镜规划-7c3aed?style=flat-square)
 ![Qwen](https://img.shields.io/badge/Qwen_Image-2.1-16a34a?style=flat-square)
-![本地运行](https://img.shields.io/badge/创作推理-全本地运行-15803d?style=flat-square)
+![本地运行](https://img.shields.io/badge/视频-H3本地运行-15803d?style=flat-square)
 ![长视频](https://img.shields.io/badge/单任务-最多100镜头_%2F_25分钟-0369a1?style=flat-square)
 
-[快速安装](#智能体开箱即用--复制即装) · [模型下载](MODELS.md) · [安装提示词](AGENT_INSTALL.md) · [版本清单](release.json)
+[使用说明](docs/WORKBENCH_GUIDE.md) · [快速安装](#智能体开箱即用--复制即装) · [模型下载](MODELS.md) · [安装提示词](AGENT_INSTALL.md) · [版本清单](release.json)
 
 </div>
 
-**放一张参考图，随意写一句话、一段故事或完整剧本，把从想法到成片的流程交给本地 AI。** 配置好模型，开启“AI 分镜”和“生图后生成视频”，点击运行，工作台会规划镜头、分配时长、生成分镜图、逐镜生成视频，最后合成完整成片。
+**放一张参考图，写一句话、一段故事或完整剧本，把从想法到成片的流程交给工作台。** 配置好模型，开启“AI 分镜”和“生图后生成视频”，点击运行，工作台会规划镜头、分配时长、生成分镜图、逐镜生成视频，最后合成完整成片。文字规划与图片生成可以分别选择本地或自己的API服务；视频由本地H3生成。
 
 > [!TIP]
 > **一键串起：参考图＋剧本 → AI 自动分镜与时长分配 → 分镜生图 → 视频生成 → 完整成片。**
 >
-> **文字规划、图片生成、视频生成与语音识别均使用本地模型，无需云端生成服务或 API Key。** 安装所需节点和模型后，创作推理在自己的电脑上完成。
+> **视频由本地 H3 生成。文字规划与图片生成可分别选择本地模型或自己的 API 配置。** 启用云端路线时，在主面板选择已保存的模型服务；本地路线不需要该服务的 API Key。
 
 ## 最值得用它的四个理由
 
@@ -54,7 +54,7 @@
 
 | 环节 | 工作台能力 |
 |---|---|
-| 视频输入 | 滑动切换图生视频／文生视频；文生直接使用文字，不读取参考图片或生成 Image2.1 分镜 |
+| 视频输入 | 滑动切换图生视频／文生视频；文生可先生成分镜提示词，单镜上传图片后自动转为首帧图生视频 |
 | 故事与分镜 | 本地语言模型规划镜头、分配内容，保留可编辑分镜计划 |
 | 提示词 | 按模型规则优化视频提示词，支持前置规则与逐镜调整 |
 | 参考图 | 多图集中上传；图1、参考图2、image 3、ref 1等自动绑定，也支持@；首帧/尾帧与镜头关联 |
@@ -68,7 +68,11 @@
 
 面板支持拖放参考图与 **Ctrl＋滚轮** 缩放；只安装一份共享节点，图片工作台可共同使用。
 
-文生视频使用现有官方基础模型，可开启独立 4/8 步加速 LoRA；切回图生时恢复原来的画幅与图生设置。模式之间保留剧本和图库，既有任务与导入计划须使用相同输入模式。RefDelta 融合权重的无图支持尚未确认，文生模式采用基础模型／独立 LoRA。
+文生视频可选择基础模型搭配独立加速、已有RefDelta融合权重，或Pika H3 Flex专用六步路线。普通H3的4/8步是快捷预设，实际可输入1～100步，权重档位独立保存；Pika保留其固定日程。切换图生/文生不会暗换模型。文生任务可在同一计划中给指定镜头补图，无需在原剧本补写图片引用。连续衔接默认承接上一镜真实末帧，可手动关闭。
+
+V1.3新增视频/图片独立多LoRA槽、文字/图片API设置、可选视频二采和跟踪脸修，均可单独开关。修正Nodes 2.0节点四角缩放、分镜/成片分隔拖动和工作台打开定位。参数、使用步骤与真实限制见[完整使用说明](docs/WORKBENCH_GUIDE.md)。
+
+本次样片使用RTX 5060 Ti 16GB与64GB内存，640×480、两镜各8秒、融合8步：文生视频流程约379秒；图生流程包含文字规划约71秒、两张低档1K分镜API图约64秒、本地视频约377秒，合计约511秒。单次样本不是速度保证，分辨率、场景、模型和显存预算都会改变时间。
 
 字幕优先按语音识别的词级时间戳显示，长句按约 10 个汉字、标点或完整英语单词分段，空档不显示首条字幕。缺少词级时间时只能在识别区间内估算分段时间；识别准确度仍取决于本地 Whisper。未编辑的旧自动字幕缓存会重新识别一次，手动编辑的时间与文本保留。
 
@@ -131,7 +135,7 @@ git clone https://github.com/BBAIGC/ComfyUI-BBAIGC-MiniMax-H3
 | 组件 | 来源 | 是否必需 |
 |---|---|---|
 | MiniMax H3 原生模型与节点 | [ComfyUI](https://github.com/Comfy-Org/ComfyUI) · [MiniMaxAI](https://huggingface.co/MiniMaxAI/MiniMax-H3) | 视频生成需要 |
-| Ollama | [ollama.com](https://ollama.com) | AI 分镜/提示词规划需要 |
+| Ollama | [ollama.com](https://ollama.com) | 使用本地 AI 分镜/提示词规划时需要；云端文字服务可选 |
 | GGUF 加载 | [city96/ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) | 使用 GGUF 图片模型时需要 |
 | 分块低显存节点 | [kijai/ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | 启用对应策略时需要 |
 | H3 稀疏注意力 | [ethanfel/ComfyUI-PlagueKind-Nodes-only-sparse](https://github.com/ethanfel/ComfyUI-PlagueKind-Nodes-only-sparse) | 可选加速 |

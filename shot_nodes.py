@@ -27,9 +27,20 @@ FPS = 24
 BASE_MODEL = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 TURBO_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
 TURBO_LORA_4STEP = "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors"
+PIKA_LORA = "pika_h3_flex_fl2va_v1_bf16.safetensors"
+PIKA_SIGMAS = (1.0, 0.972973, 0.923077, 0.8, 0.571429, 0.333333, 0.0)
 TEXT_ENCODER = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 VIDEO_VAE = "minimax_h3_video_vae_int8_convrot.safetensors"
 AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
+
+
+def _sampling_sigmas(bundle, scheduler, steps):
+    if bundle.get('sampling_route') == 'pika_h3_flex':
+        if steps != 6:
+            raise ValueError('Pika H3 Flex使用官方固定6步日程。')
+        return torch.tensor(PIKA_SIGMAS, dtype=torch.float32, device='cpu')
+    from comfy_extras.nodes_custom_sampler import BasicScheduler
+    return _outputs(BasicScheduler.execute(bundle['model'], scheduler, int(steps), 1.0))[0]
 
 
 def _outputs(value):
@@ -117,7 +128,7 @@ class H3VideoModelBundle:
             "video_vae_name": _combo("vae", VIDEO_VAE),
             "audio_vae_name": _combo("vae", AUDIO_VAE),
             "turbo_enabled": ("BOOLEAN", {"default": True}),
-            "accelerated_steps": ("INT", {"default": 8, "forceInput": True, "min": 4, "max": 8, "step": 4}),
+            "accelerated_steps": ("INT", {"default": 8, "forceInput": True, "min": 1, "max": 100, "step": 1}),
             "turbo_lora": _combo("loras", TURBO_LORA),
             "turbo_lora_4step": _combo("loras", TURBO_LORA_4STEP),
             "low_vram": ("BOOLEAN", {"default": True}),
@@ -134,7 +145,8 @@ class H3VideoModelBundle:
              video_vae_name=VIDEO_VAE, audio_vae_name=AUDIO_VAE,
              turbo_enabled=True, turbo_lora=TURBO_LORA, low_vram=True,
              sparse_attention=False, accelerated_steps=8,
-             turbo_lora_4step=TURBO_LORA_4STEP, input_mode="I2V"):
+             turbo_lora_4step=TURBO_LORA_4STEP, input_mode="I2V",
+             pika_enabled=False, pika_lora=PIKA_LORA, turbo_lora_steps=None):
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3SigmaShift
         if input_mode not in ("I2V", "T2VA"):
             raise ValueError("视频输入模式应为图生视频或文生视频。")
@@ -152,17 +164,28 @@ class H3VideoModelBundle:
             raise ValueError("此流程只接受未融合的 MiniMax H3 FL2VA 基础模型，避免重复叠加加速权重。")
         actual_lora = None
         turbo_steps = None
-        if turbo_enabled:
-            if accelerated_steps not in (4, 8):
-                raise ValueError("加速采样仅支持配套的 4 步或 8 步。")
+        if pika_enabled:
+            if turbo_enabled:
+                raise ValueError("Pika H3 Flex不能与Turbo加速LoRA叠加。")
+            if pika_lora not in folder_paths.get_filename_list("loras"):
+                raise ValueError("缺少Pika H3 Flex专用LoRA：" + str(pika_lora))
+            if Path(str(pika_lora)).name.lower() != PIKA_LORA.lower():
+                raise ValueError("Pika H3 Flex须使用官方专用LoRA。")
+            actual_lora, turbo_steps = pika_lora, 6
+        elif turbo_enabled:
+            if type(accelerated_steps) is not int or not 1 <= accelerated_steps <= 100:
+                raise ValueError("加速采样步数应为1～100的整数。")
             turbo_steps = int(accelerated_steps)
-            actual_lora = turbo_lora_4step if turbo_steps == 4 else turbo_lora
+            weight_steps = (4 if turbo_steps == 4 else 8) if turbo_lora_steps is None else turbo_lora_steps
+            if weight_steps not in (4, 8):
+                raise ValueError("加速LoRA档位应为4步权重或8步权重。")
+            actual_lora = turbo_lora_4step if weight_steps == 4 else turbo_lora
             lora_filename = Path(str(actual_lora).replace("\\", "/")).name.lower()
-            if "fl2v_turbo" not in lora_filename or f"_{turbo_steps}step" not in lora_filename:
-                raise ValueError(f"{turbo_steps} 步采样必须使用对应的 FL2V {turbo_steps} 步加速 LoRA。")
+            if "fl2v_turbo" not in lora_filename or f"_{weight_steps}step" not in lora_filename:
+                raise ValueError(f"所选加速LoRA档位须使用FL2V {weight_steps}步权重。")
 
         model = nodes.UNETLoader().load_unet(unet_name, "default")[0]
-        if turbo_enabled:
+        if turbo_enabled or pika_enabled:
             model = nodes.LoraLoaderModelOnly().load_lora_model_only(model, actual_lora, 1.0)[0]
         if low_vram:
             model = _execute_v3("MiniMaxChunkFeedForward", model=model, chunks=4, seq_threshold=4096)[0]
@@ -176,18 +199,24 @@ class H3VideoModelBundle:
         # The 768p four-step LoRA was distilled with 6/3 shifts. Apply that
         # documented schedule to the new text-only route; existing I2V keeps
         # its saved 12/3 behavior.
-        video_shift = 6.0 if (input_mode == "T2VA" and turbo_enabled and turbo_steps == 4 and
+        video_shift = 6.0 if (input_mode == "T2VA" and turbo_enabled and weight_steps == 4 and
                               "768p" in str(actual_lora).lower()) else 12.0
-        model = _outputs(MiniMaxH3SigmaShift.execute(model, video_shift, 3.0))[0]
+        if not pika_enabled:
+            model = _outputs(MiniMaxH3SigmaShift.execute(model, video_shift, 3.0))[0]
         clip = nodes.CLIPLoader().load_clip(clip_name, "minimax", "default")[0]
         vae = nodes.VAELoader().load_vae(video_vae_name)[0]
         audio_vae = nodes.VAELoader().load_vae(audio_vae_name)[0]
         return ({"model": model, "clip": clip, "vae": vae, "audio_vae": audio_vae,
-                 "ready_plan": ready_plan, "turbo_enabled": bool(turbo_enabled),
+                 "ready_plan": ready_plan, "turbo_enabled": bool(turbo_enabled or pika_enabled),
                  "turbo_steps": turbo_steps, "turbo_lora": actual_lora,
+                 "turbo_lora_steps": 6 if pika_enabled else weight_steps if turbo_enabled else None,
                  "cfg": 1.0,
                  "sparse_attention": use_sparse, "model_name": unet_name,
-                 "input_mode": input_mode, "sigma_shift_video": video_shift, "sigma_shift_audio": 3.0},)
+                 "input_mode": input_mode, "sigma_shift_video": None if pika_enabled else video_shift,
+                 "sigma_shift_audio": None if pika_enabled else 3.0,
+                 "sampling_route": "pika_h3_flex" if pika_enabled else "h3",
+                 "pika_enabled": bool(pika_enabled),
+                 "manual_sigmas": PIKA_SIGMAS if pika_enabled else None},)
 
 
 class H3SamplingSteps:
@@ -254,10 +283,12 @@ class H3GenerateShot:
                  first_frame=None, previous_video=None, previous_last_frame=None, last_frame=None,
                  sampler_name="res_multistep", scheduler="simple", execution_prompt=None, extra_pnginfo=None):
         from .output_metadata import execution_metadata
+        from .video_memory import video_memory_budget
         # Internal studio calls inherit their execution's snapshot. A standalone
         # shot receives its own hidden metadata without changing the text prompt.
-        with execution_metadata(prompt=execution_prompt, extra_pnginfo=extra_pnginfo):
-            return self._generate(bundle, prompt, width, height, seconds, steps, seed, audio_mode,
+        with execution_metadata(prompt=execution_prompt, extra_pnginfo=extra_pnginfo), video_memory_budget(
+                bundle.get('_vram_reserve_gb', 0), bundle.get('_low_vram', True)) as memory_receipt:
+            return self._generate({**bundle, '_memory_receipt': memory_receipt}, prompt, width, height, seconds, steps, seed, audio_mode,
                                   continue_previous, first_frame, previous_video, previous_last_frame,
                                   last_frame, sampler_name, scheduler)
 
@@ -301,8 +332,8 @@ class H3GenerateShot:
                 not math.isclose(float(seconds), planned_seconds, rel_tol=0.0, abs_tol=1e-6)):
             raise ValueError("生成时长与提示词计划不一致；请使用计划中的镜头时长后再运行。")
         actual_seconds = target_frames / FPS
-        if bundle["turbo_enabled"] and int(steps) != bundle.get("turbo_steps"):
-            raise ValueError("采样步数与当前加速 LoRA 不匹配；请将同一个 4/8 步开关连接到模型和采样步数。")
+        if type(steps) is not int or not 1 <= steps <= 100:
+            raise ValueError("视频采样步数应为1～100的整数。")
         effective_steps = int(steps) if bundle["turbo_enabled"] else max(20, int(steps))
         dialogue_track = bundle.get("_dialogue_track")
         explicit_silent = bool(bundle.get("_user_silent", audio_mode == "静音"))
@@ -360,7 +391,11 @@ class H3GenerateShot:
                 # H3 is already CFG-distilled. The official native workflow
                 # uses BasicGuider (CFG 1), including the 20-step base path.
                 guider = _outputs(BasicGuider.execute(bundle["model"], positive))[0]
-                sigmas = _outputs(BasicScheduler.execute(bundle["model"], scheduler, effective_steps, 1.0))[0]
+                if bundle.get("sampling_route") == "pika_h3_flex":
+                    if int(steps) != 6:
+                        raise ValueError("Pika H3 Flex使用官方固定6步日程。")
+                    sampler_name = "lcm"
+                sigmas = _sampling_sigmas(bundle, scheduler, effective_steps)
                 noise = _outputs(RandomNoise.execute(int(seed)))[0]
                 sampler = _outputs(KSamplerSelect.execute(sampler_name))[0]
                 sampler_result = SamplerCustomAdvanced.execute(noise, guider, sampler, sigmas, latent)
@@ -368,14 +403,22 @@ class H3GenerateShot:
                 local.update(guider=guider, sigmas=sigmas, noise=noise,
                              sampler=sampler, sampler_result=sampler_result, samples=samples)
                 mm.throw_exception_if_processing_interrupted()
+                from .video_postprocess import normalize_settings, refine_latent, refine_faces
+                postprocess = normalize_settings(bundle.get("_video_postprocess"))
+                original_samples = samples
+                from .video_lora import refine_video_lora_slots
+                samples, lora_refinement = refine_video_lora_slots(
+                    bundle, positive, samples, int(seed), sampler_name, scheduler)
+                samples, latent_refine_receipt = refine_latent(bundle, positive, samples, int(seed), postprocess)
                 frames = nodes.VAEDecode().decode(bundle["vae"], samples)[0]
                 frames = frames.detach().to(device="cpu", dtype=torch.float32)
                 if len(frames) < target_frames:
                     raise RuntimeError(f"生成帧数不足：需要 {target_frames} 帧，实际 {len(frames)} 帧。")
                 # Trim on the pixel clock before encoding, including the audio.
                 frames = frames[:target_frames].contiguous()
+                frames, face_refine_receipt = refine_faces(bundle, str(prompt), frames, int(seed), postprocess)
                 last_frame = frames[-1:].clone()
-                raw_audio = None if silent or using_dialogue else _outputs(VAEDecodeAudio.execute(bundle["audio_vae"], samples))[0]
+                raw_audio = None if silent or using_dialogue else _outputs(VAEDecodeAudio.execute(bundle["audio_vae"], original_samples))[0]
                 audio = _audio_for_export(guided_audio if using_dialogue else raw_audio, target_frames, silent)
                 local.update(frames=frames, raw_audio=raw_audio, audio=audio)
                 unencoded = _outputs(CreateVideo.execute(
@@ -401,7 +444,15 @@ class H3GenerateShot:
                 "sampler": sampler_name, "scheduler": scheduler,
                 "turbo_enabled": bundle["turbo_enabled"],
                 "turbo_steps": bundle.get("turbo_steps"),
+                "turbo_lora_steps": bundle.get("turbo_lora_steps"),
                 "turbo_lora": bundle.get("turbo_lora"),
+                "sampling_route": bundle.get("sampling_route", "h3"),
+                "manual_sigmas": bundle.get("manual_sigmas"),
+                "video_loras": bundle.get("video_loras", []),
+                "lora_refinement": lora_refinement,
+                "memory_budget": bundle.get("_memory_receipt"),
+                "latent_refine": latent_refine_receipt,
+                "face_refine": face_refine_receipt,
                 "input_mode": input_mode,
                 "sigma_shift_video": bundle.get("sigma_shift_video", 12.0),
                 "sigma_shift_audio": bundle.get("sigma_shift_audio", 3.0),

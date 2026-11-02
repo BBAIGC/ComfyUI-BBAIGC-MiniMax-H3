@@ -518,6 +518,7 @@ function install(node) {
         slots.sort((a,b)=>Number(a)-Number(b));
         root.replaceChildren();const columns={};
         for(const[key,title]of [['base','基础与生成'],['lora','LoRA'],['finish','修复与超分']]){const section=el('section','qws-column');section.dataset.section=key;section.append(el('h3','',title));columns[key]=section;root.append(section);}
+        const help=el('a','','使用说明');help.href='https://github.com/BBAIGC/ComfyUI-BBAIGC-MiniMax-H3/blob/main/docs/WORKBENCH_GUIDE.md';help.target='_blank';help.rel='noopener noreferrer';help.style.cssText='float:right;font-size:12px;font-weight:400;color:inherit';columns.base.querySelector('h3').append(help);
         const cloudConnection=bbapiPanel(columns.base),cloudNodeIds=new Set([mapping.bbapi_connection_node,mapping.bbapi_image_node,mapping.bbapi_generator_node].filter(value=>value!=null).map(String));
         const folds=new Map();
         const targetParent=item=>{

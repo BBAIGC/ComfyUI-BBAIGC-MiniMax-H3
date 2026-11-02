@@ -1,5 +1,13 @@
 # MiniMax H3 小陈工作台 · 模型与依赖
 
+## V1.3可选功能
+
+- Pika H3 Flex FL2VA：从 [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/loras) 下载 `loras/pika_h3_flex_fl2va_v1_bf16.safetensors`，1,956,172,304字节，SHA-256 `cc5453aeecd6189468409003fe4cf1b57e52ff3a830a0a154b87decbe07358b7`。放入`models/loras/`，复用现有H3 FL2VA基础模型、编码器与双VAE。必须选工作台专用Pika路线，不和4/8步Turbo叠加；固定LCM六步日程由代码设置。参考[官方模板说明](https://docs.comfy.org/tutorials/video/pika/pika-h3-flex)及模型许可。
+- 视频脸修：安装`ultralytics`到当前ComfyUI Python；[Bingsu/adetailer的face_yolov8m.pt](https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8m.pt)放入`models/ultralytics/bbox/`。当前文件52,026,019字节，SHA-256 `717923c19b3f4bbf5250b728f1fa6b2cb72a33aed1d236ea9caf0e21ad943e5f`。只启用脸修时才加载；默认关。
+- 图片/文本API：安装共享[BBAPI节点](https://github.com/BBAIGC/ComfyUI-BBAIGC-BBAPI)并在本机保存自己的密钥与分组对应模型。使用API生图可省略本地Qwen图片权重；使用API文字规划可省略本地Ollama规划模型。视频H3仍需本地权重。
+
+脸修跟踪与贴回辅助代码来源为[AIMixer导演台](https://github.com/AIMixer/ComfyUI_MiniMaxH3_Director)，原始适配源为[Carasibana脸修](https://github.com/Carasibana/ComfyUI-H3-FaceRefine)。具体授权与本地改动见`face_refine_helpers/NOTICE.md`。
+
 本页文件大小采用十进制 GB（1 GB = 10⁹ 字节），来自已下载文件或上游 Hugging Face 文件元数据；下载体积不等于显存占用。作者设备为 NVIDIA RTX 5060 Ti 16GB、Intel Core i7-12700KF、64GB 内存，Windows 11。其他设备的速度与最大尺寸取决于驱动、PyTorch/CUDA、分辨率、步数与内存卸载。无需一次下载所有可选路线。
 
 ComfyUI 应使用支持这些模型的版本；作者现有核心为 0.43.0、前端 1.57.4。安装时先核对 `/object_info` 中所需节点，不能只凭版本号判断。RTX 50 系需要支持 Blackwell 的 NVIDIA 驱动及 PyTorch CUDA 构建；先执行 `python -c "import torch; print(torch.__version__,torch.cuda.is_available(),torch.cuda.get_device_name(0))"` 核验。保留现有可工作的 PyTorch，切勿盲目降级。

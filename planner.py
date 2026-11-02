@@ -26,7 +26,8 @@ from .reference_composition import (source_reference_labels, native_reference_pr
                                     infer_reference_roles, reference_roles_text)
 from .duration_allocation import (DURATION_MODES, allocation_target, allocation_request, normalize_allocation)
 from .prompt_presets import normalize_prompt_rules, preset_system_text
-from .motion_continuity import is_continuous_take, apply_motion_continuity
+from .motion_continuity import is_continuous_take, apply_motion_continuity, single_action_note, finite_gesture_timing
+from .dialogue_pacing import fit_dialogue_windows
 
 log = logging.getLogger(__name__)
 PREFERRED_MODEL = "uncensored-qwen3.5:9b-aggressive"
@@ -51,7 +52,7 @@ DEMO_SCRIPT = (
     "最后把杯子放回桌面，看着镜头说：‘谢谢观看。’真实生活视频，无配乐，没有画外旁白。"
 )
 
-_QUOTES = re.compile(r'“([^”\n]+)”|「([^」\n]+)」|『([^』\n]+)』|‘([^’\n]+)’|"([^"\n]+)"')
+_QUOTES = re.compile(r'''“([^”\n]+)”|「([^」\n]+)」|『([^』\n]+)』|‘([^’\n]+)’|"([^"\n]+)"|(?<!\w)'((?:[^'\n]|(?<=\w)'(?=\w))+)'(?!\w)''')
 _SPEECH_LEAD = re.compile(
     r"(?:台词|对白|旁白|独白|画外音|对话|说道|说出|说|问道|问|回答道|回答|喊道|喊出|喊|"
     r"念道|念出|提醒道|says?|asks?|repl(?:y|ies)|whispers?|dialogue|voiceover)"
@@ -70,6 +71,8 @@ _STORYBOARD_QUALITY_CONTRACT = """剧情与对白编排约定：
 每条对白仍跟随其原稿触发动作和人物反应。原稿明确指定的时间、先后因果、安静段落和无对白结尾优先，不追求机械平均。
 静默镜头应有原稿支持的动作进展、反应或必要留白，不把一个动作结束后的同一状态反复当成新情节。
 动作与静帧约定：每镜聚焦一个主要动作，原稿要求的次要动作顺次完成，不添加大幅动作、多手交叉或新人物来制造变化。
+微微点头、摇头、挥手等短动作默认为一次；写清完成后的自然姿态，不能因为镜头较长就循环动作。只有原稿明确要求反复时才重复。
+同一人物连贯说出的招呼与递物邀请按原稿因果分配，不为填满镜头而拆开一句话或擅自更换说话人。每句留足自然发音时间，末句结束后留约0.4秒再切镜。
 原稿允许的眼神、表情、身体朝向、手的位置和镜头距离可逐步变化，丰富性来自事件进展；原稿要求连续长镜头时保持同一移动轨迹。
 手接触人物或物体时，动作写清执行者、左右手、接触位置、先后与遮挡关系，避免同时叠加多个接触动作；没有这些动作则不要自行加入。
 start_state/end_state与start_facts/end_facts记录同一瞬间的可见状态，不代表人物必须停住；下一镜开场逐项继承上一镜结束结果，未改变的衣物和道具状态保留。
@@ -77,6 +80,7 @@ start_state/end_state与start_facts/end_facts记录同一瞬间的可见状态�
 未完成的动作阶段不能写成completed_actions，连续动作可跨内部边界发展。只保留原稿明确需要的停顿与全片终点停留，不因为当前批次或片段结束就新增停顿。
 continuity只记录稳定身份与风格，不能混入会变化的穿戴、姿态或手持物。原始参考只锚定身份、自然纹理、材质和光照，不能恢复初始状态。
 image_prompt只描述本镜开场的同一瞬间，composition只是该时刻的构图；不能提前画出本镜将发生的动作或多个手势。
+visual只写主体外观、场景与静态构图，不写action的动态动词。action只出现一条按时间推进的动作描述：短动作在前1～2秒完成一次，随后清楚写出余下时间的自然终态；不逐段重述该动作。
 上一分镜图仅补几何与状态，不作为新的肤质或清晰度标准，保持最初参考的自然皮肤、发丝和衣料细节，不逐镜磨皮。
 这些是规划约定，不要复制进画面描述、音效、配乐或台词。"""
 
@@ -144,11 +148,27 @@ def extract_dialogue(script, override=""):
                 used_ranges.append((match.start(), match.end()+end))
         candidates.sort(key=lambda item: item[-1])
     output = []
+    anchored_speakers = {}
     for text, speaker, offscreen, context, locked, _position in candidates:
+        source_speaker = ""
         if not text.strip() or len(text) > 1500 or "<" in text or ">" in text:
             raise ValueError("识别到的对白为空、过长或包含控制标签，请使用“指定对白覆盖”填写纯台词。")
+        # Lock an explicitly acting named role. A role merely addressed by
+        # another person ("店员看向客人") is not the speaking subject.
+        if not locked and not offscreen and not override.strip():
+            source_prefix = script[:_position]
+            clause = re.split(r"[。！？!?\n]", source_prefix)[-1]
+            role = re.search(r"(店员|服务员|客人|顾客|女主人|男主人|母亲|父亲|妈妈|爸爸|老师|学生)"
+                             r"(?=\s*(?:正在|看向|看着|微笑|轻轻|只|说|问|回答|拿|将|把|抬|转|放|坐|站))", clause)
+            if role and not re.search(r"(?:旁边|身后|面前|身边)的\s*$", clause[:role.start()]):
+                anchor = role.group(1)
+                if anchor not in anchored_speakers:
+                    anchored_speakers[anchor] = f"S{len(anchored_speakers)+1}"
+                speaker, locked = anchored_speakers[anchor], True
+                source_speaker = anchor
         output.append({"id": f"D{len(output) + 1}", "text": text, "speaker": speaker,
                        "speaker_locked": locked, "offscreen": offscreen, "source_context": context,
+                       "source_speaker": source_speaker,
                        "language": _language(text)})
     return output
 
@@ -417,9 +437,14 @@ def _facts_text(facts):
 
 def _stable_continuity(text, *, constraints=False):
     """Keep identity/style limits without reissuing changing source events."""
+    if constraints:
+        text = "".join(sentence for sentence in re.split(r"(?<=[。！？!?\n])", text)
+                       if not re.search(r"第[一二三四五六七八九十百\d]+(?:镜|段|幕)|镜头\s*\d+|\b(?:shot|scene)\s*\d+", sentence, re.I))
     parts = re.split(r"(?<=[。；;，,\n])", text)
     result = []
     for part in parts:
+        if constraints and re.search(r"白名单|原句|原顺序|分配|回填|编号|提示词|原稿|镜头规划|schema|JSON", part, re.I):
+            continue
         if constraints and re.search(r"不要|不许|禁止|不能|不必|没有|不得|无需|避免|不再", part):
             result.append(part)
             continue
@@ -655,6 +680,10 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
     continuity = native_reference_prose(_sanitize_description_speech(_text(raw, "continuity", allow_empty=True)))
     constraints = native_reference_prose(_sanitize_description_speech(_text(raw, "constraints", allow_empty=True)))
     expected = {item["id"]: item for item in dialogues}
+    actor_names = {line["speaker"]: line["source_speaker"] for line in dialogues if line.get("source_speaker")}
+    def identify_actors(text):
+        return re.sub(r'(?<![A-Za-z0-9])S[1-9]\d*(?![A-Za-z0-9])',
+                      lambda match: actor_names.get(match.group(0), match.group(0)), str(text))
     observed = []
     compiled = []
     normalized = []
@@ -678,10 +707,6 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
         permitted_words = [expected[entry["id"]]["text"] for entry in assigned
                            if isinstance(entry, dict) and entry.get("id") in expected]
         for name in ("visual", "action", "soundscape", "music", "start_state", "end_state", "image_prompt"):
-            if text_only and name == "image_prompt":
-                if name in source:
-                    source[name] = ""
-                continue
             if name not in source and name in ("start_state", "end_state", "image_prompt"):
                 continue
             source[name] = _sanitize_description_speech(
@@ -691,9 +716,11 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
                 source[name] = native_reference_prose(source[name])
             if has_environment and name in ("visual", "start_state", "end_state", "image_prompt"):
                 source[name] = sanitize_environment_text(source[name], end_environment if name == "end_state" else env_anchor)
-                if name == "image_prompt":
+                if name == "image_prompt" and not text_only:
                     source[name] = lock_environment_prompt(source[name], env_anchor)
         visual, action = source["visual"], source["action"]
+        action += " " + single_action_note(action, script)
+        action = finite_gesture_timing(action, script, seconds[index])
         ambience = source["soundscape"] or "与可见场景一致的安静自然环境音。"
         music = source["music"] or "N/A"
         has_ledger = "start_facts" in source or "end_facts" in source
@@ -704,33 +731,45 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
         inherited = bool(source.get("previously_completed_actions"))
         if inherited:
             visual = _stable_continuity(visual)
-        body = "[Shot 1] "
-        if start_facts:
-            body += "开场已经成立的事实：" + native_reference_prose(_facts_text(start_facts)) + "。这些事实优先于原始参考图及旧的外观描述，直接从当前结果继续。"
-        body += f" {visual} {action}"
+        from .static_prompt import static_text
+        opening = static_text(identify_actors(source.get('start_state', '')))
+        framing = static_text(identify_actors(source.get('composition', '')))
+        # One action paragraph only. The state and event ledgers are planning
+        # metadata; listing the same gesture in visual/start/end/facts makes
+        # the video model interpret it as several occurrences.
+        body = "[Shot 1] " + (opening or static_text(visual)) + " " + framing + " " + identify_actors(action)
         current_continuity = _stable_continuity(continuity) if has_ledger else continuity
         current_constraints = _stable_continuity(constraints, constraints=True) if has_ledger else constraints
         if has_environment:
             current_continuity = sanitize_environment_text(current_continuity, env_anchor, environment_only=True)
             current_constraints = sanitize_environment_text(current_constraints, env_anchor, environment_only=True)
         if current_continuity:
-            body += " 连续性：" + current_continuity
+            body += " 连续性：" + identify_actors(current_continuity)
         if current_constraints:
-            body += " 限制：" + current_constraints
+            body += " 限制：" + identify_actors(current_constraints)
         start_state = _text(source, "start_state", allow_empty=True) if "start_state" in source else ""
         end_state = _text(source, "end_state", allow_empty=True) if "end_state" in source else ""
-        if start_state:
-            body += " 本镜开始时已成立的状态：" + start_state + "。直接从此状态继续；不要重新表演已经完成的动作。"
-        if end_state:
-            body += " 本镜结束状态：" + end_state
-        if "newly_completed_actions" in source:
-            events = source["newly_completed_actions"]
-            body += (" 本镜仅执行的新事件：" + "；".join(events) + "。" if events else
-                     " 本镜保持已完成事件的结果，原稿已有动作自然接续，不重新执行先前的一次性动作。" if continuous_take else
-                     " 本镜保持已完成事件的结果和自然停顿，不重新执行先前的一次性动作。")
-        if end_facts:
-            body += " 结束时成立的事实：" + native_reference_prose(_facts_text(end_facts)) + "。未明确改变的实体继续保持开场状态。"
         speech = []
+        spans = []
+        # Normalize clocks before checking the duration of the actual utterance.
+        for entry in assigned:
+            try:
+                start, end = float(entry["start"]), float(entry["end"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("分镜对白时间无效。") from exc
+            if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= seconds[index]):
+                offset = offsets[index]
+                if math.isfinite(start) and math.isfinite(end) and offset <= start < end <= offset + seconds[index]:
+                    start, end = start-offset, end-offset
+                else:
+                    raise ValueError(f"镜头{index + 1}的对白时间超出镜头时长。")
+            if spans and start < spans[-1][1]:
+                raise ValueError(f"镜头{index + 1}的对白重叠，请重新规划。")
+            spans.append((start, end))
+            entry.update(start=start, end=end)
+        repairs = fit_dialogue_windows(assigned, expected, seconds[index])
+        if repairs:
+            source["dialogue_timing_repairs"] = repairs
         spans = []
         for entry in assigned:
             identifier = entry["id"]
@@ -757,11 +796,30 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
             if not isinstance(speaker_id, str) or not re.fullmatch(r"S[1-9]\d*", speaker_id):
                 raise ValueError("规划中的说话人编号无效。")
             if line.get("speaker_locked") and speaker_id != line["speaker"]:
-                raise ValueError("规划改变了指定对白的说话人编号。")
+                if not line.get("source_speaker"):
+                    raise ValueError("规划改变了指定对白的说话人编号。")
+                source.setdefault("speaker_assignment_repairs", []).append({"id": identifier,
+                    "before": speaker_id, "after": line["speaker"], "reason": "explicit_source_role"})
+                speaker_id = entry["speaker_id"] = line["speaker"]
+                entry["speaker_description"] = line["source_speaker"] + "，自然清晰的声线"
+            labels = set(re.findall(r"(?<![A-Za-z0-9])S[1-9]\d*(?![A-Za-z0-9])", str(entry.get("speaker_description", ""))))
+            if len(labels) == 1 and speaker_id not in labels:
+                if line.get("speaker_locked"):
+                    if not line.get("source_speaker"):
+                        raise ValueError("规划的说话人描述与指定人物编号矛盾，请修正后再生成。")
+                    entry["speaker_description"] = line["source_speaker"] + "，自然清晰的声线"
+                    source.setdefault("speaker_assignment_repairs", []).append({"id": identifier,
+                        "before": list(labels), "after": speaker_id, "reason": "explicit_source_role_description"})
+                else:
+                    corrected = next(iter(labels))
+                    source.setdefault("speaker_assignment_repairs", []).append({"id": identifier,
+                        "before": speaker_id, "after": corrected, "reason": "explicit_description_label"})
+                    speaker_id = entry["speaker_id"] = corrected
             speaker = _sanitize_description_speech(_text(entry, "speaker_description", limit=1200))
             delivery = _sanitize_description_speech(_text(entry, "delivery", limit=1200),
                                                        permitted_words, preserve_performance=True)
             entry["speaker_description"], entry["delivery"] = speaker, delivery
+            speaker, delivery = identify_actors(speaker), identify_actors(delivery)
             if not line["offscreen"] and re.search(r"lips? (?:remain|stay|are|is|kept)?\s*(?:completely |naturally )?closed|嘴唇.*闭", speaker + " " + delivery, re.I):
                 raise ValueError("规划把画面人物对白写成闭嘴状态，已停止生成。")
             words = f"<d>[{line['language']}] {line['text']}</d>"
@@ -781,7 +839,7 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
             ambience += " 不加入人声、旁白、歌唱或额外发声。"
         if is_silent:
             ambience, music = "N/A", "N/A"
-        if has_environment:
+        if has_environment and not text_only:
             body = lock_environment_prompt(body, env_anchor, end_environment)
         fields = dict(zip(H3_FIELDS, (body, ambience, music)))
         fields = apply_motion_continuity(fields, script, scene_index_offset + index, total_scene_count)
@@ -899,6 +957,15 @@ def _text_model_settings(settings):
         if not isinstance(settings["model"], str) or not settings["model"].strip():
             raise ValueError("文本模型配置中的模型名称无效。")
         result["model"] = settings["model"]
+    if settings.get("provider") == "bbapi":
+        protocol = settings.get("protocol", "auto")
+        if protocol not in ("auto", "responses", "chat"):
+            raise ValueError("文本API协议无效。")
+        result["protocol"] = protocol
+        for key in ("provider", "profile", "base_url"):
+            if not isinstance(settings.get(key), str) or not settings[key].strip():
+                raise ValueError(f"云端文本配置{key}无效。")
+            result[key] = settings[key]
     return result
 
 
@@ -912,6 +979,17 @@ def _sequence_chat(client, model_name, system, payload, schema, seed, references
         message["content"] += "\n附带图片按顺序对应：" + "；".join(
             f"联系表第{offset//4+1}页=" + "、".join("素材"+ref["id"] for ref in references[offset:offset+4])
             for offset in range(0, len(references), 4))
+    if model_settings and model_settings.get("provider") == "bbapi":
+        from .cloud_bridge import chat_json
+        if vision:
+            message["content"] = [{"type": "text", "text": message["content"]}] + [
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image}}
+                for image in vision]
+        message.pop("images", None)
+        result = chat_json([{"role": "system", "content": system}, message],
+                           {**model_settings, "schema": schema})
+        _sequence_check_cancelled()
+        return result
     options = {"temperature": 0.1, "seed": int(seed), "num_ctx": 32768,
                "num_predict": max_tokens, "repeat_penalty": 1.05}
     if model_settings:
@@ -958,6 +1036,52 @@ def _outline_pacing_issues(shots, seconds, dialogue_count):
             max(len(slot.get("dialogue_ids", [])) for slot in shots) >= math.ceil(dialogue_count*0.75)):
         issues.append("大多数对白集中同一镜，需核对语速和对白关联事件的分布")
     return issues
+
+
+def _ensure_plan_language(client, model_name, raw, script, seed, model_settings):
+    """Correct prose language once without regenerating events or assignments."""
+    if not re.search(r"[\u3400-\u9fff]", script):
+        return raw
+    prose_keys = {"continuity", "constraints", "visual", "action", "soundscape", "music", "image_prompt",
+                  "composition", "start_state", "end_state", "speaker_description", "delivery", "silence_reason"}
+    pending, locations = {}, {}
+    def visit(value, parent=""):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if (key in prose_keys or parent in ("start_facts", "end_facts")) and isinstance(item, str) and item not in ("", "N/A"):
+                    letters = len(re.findall(r"[A-Za-z]", item))
+                    chinese = len(re.findall(r"[\u3400-\u9fff]", item))
+                    if letters > max(15, chinese * 2):
+                        identifier = f"P{len(pending)+1}"
+                        pending[identifier], locations[identifier] = item, (value, key)
+                elif isinstance(item, (dict, list)):
+                    visit(item, key)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item, parent)
+    result = copy.deepcopy(raw)
+    visit(result)
+    if not pending:
+        return result
+    schema = {"type": "object", "properties": {key: {"type": "string"} for key in pending},
+              "required": list(pending), "additionalProperties": False}
+    translated = _sequence_chat(client, model_name,
+        "将给定分镜描述逐项翻译成自然、简洁的简体中文，只返回指定JSON。只翻译语言，不改剧情、角色、动作次数、时间或因果，"
+        "S1/S2等人物编号和数字必须原样保留。不能增加或改写台词，不加说明。N/A保留原样。",
+        {"prose": pending}, schema, seed+313, max_tokens=min(14000, 1000+len(pending)*180), model_settings=model_settings)
+    if not isinstance(translated, dict) or set(translated) != set(pending):
+        raise ValueError("分镜语言校正未完整返回，原始分镜已保留，尚未开始视频生成。")
+    for identifier, text in translated.items():
+        if not isinstance(text, str) or not text.strip() or len(text) > 6000:
+            raise ValueError("分镜语言校正返回无效文本。")
+        if len(re.findall(r"[A-Za-z]", text)) > max(20, len(re.findall(r"[\u3400-\u9fff]", text))*2):
+            raise ValueError("分镜语言校正仍未返回中文，请切换语言模型后重新规划。")
+        original_ids = set(re.findall(r"\bS[1-9]\d*\b", pending[identifier]))
+        if set(re.findall(r"\bS[1-9]\d*\b", text)) != original_ids:
+            raise ValueError("分镜语言校正改变人物编号，尚未开始视频生成。")
+        target, key = locations[identifier]
+        target[key] = text
+    return result
 
 
 def _normalize_outline(raw, seconds, dialogues, catalog, script):
@@ -1074,6 +1198,13 @@ def _boundary_image_prompt(state, continuity="", facts=None, inherited=False, en
             "手与身体、物体接触处的边界及遮挡关系清楚，人体比例自然，同一瞬间不出现多重手势。"), anchor)
 
 
+def text_storyboard_image_prompt(state, continuity="", facts=None, composition=""):
+    """A usable text-to-image still prompt without imaginary reference images."""
+    from .static_prompt import static_text
+    details = [static_text(value) for value in (continuity, state, composition, _facts_text(facts or {})) if value]
+    return "生成一张独立的静态分镜开场图，不拼图、不加字幕。" + "；".join(details) + "。只呈现此刻的一个瞬间，人物比例、手部和物体遮挡自然。"
+
+
 def _without_ui_reference_tokens(value):
     value = source_reference_labels(value)
     return re.sub(r"@(?:分镜\d+|结束帧)", "对应分镜画面", value)
@@ -1147,7 +1278,8 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
         dialogues = []
     elif voice_mode == "仅指定对白" and not dialogues:
         raise ValueError("没有识别到明确对白，请在剧本中写明台词。")
-    if model_name not in local_models():
+    cloud = bool(model_settings and model_settings.get("provider") == "bbapi")
+    if not cloud and model_name not in local_models():
         raise ValueError("所选千问模型不在本机，此流程不会自动下载语言模型。")
     from comfy import model_management as mm
     started = time.monotonic()
@@ -1160,7 +1292,14 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
     dialogue_assignment_repairs = []
     outline_pacing = {}
     receipt = None
-    client = LocalOllama()
+    class RemotePlanningSession:
+        def start(self):
+            pass
+        def unload(self, _model):
+            return {"confirmed": True, "provider": "bbapi", "local_model_loaded": False}
+        def close_owned(self):
+            pass
+    client = RemotePlanningSession() if cloud else LocalOllama()
     client.cancel_check = _sequence_check_cancelled
     client.progress = progress
     with _LOCK:
@@ -1228,6 +1367,7 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
                         dialogue_assignment_repairs.append({"first_scene_number": offset+1,
                                                            "dialogue_ids": [line["id"] for line in batch_dialogues],
                                                            "issues": assignment_problems, "attempts": 1, "status": "reconciled"})
+                    raw = _ensure_plan_language(client, model_name, raw, script, seed+offset, model_settings)
                     if previous_environment is None:
                         previous_environment = initial_environment_anchor(raw.get("environment_anchor"), script)
                         opening_environment = copy.deepcopy(previous_environment)
@@ -1317,7 +1457,9 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
                         # description: that would put contradictory instructions
                         # in the same image prompt. Rebuild from the normalized
                         # boundary state only, without this clip's action prose.
-                        scene["image_prompt"] = "" if text_only else _boundary_image_prompt(
+                        scene["image_prompt"] = text_storyboard_image_prompt(
+                            scene["start_state"], _text(raw, "continuity", allow_empty=True),
+                            facts=start_facts, composition=composition) if text_only else _boundary_image_prompt(
                             scene["start_state"], _text(raw, "continuity", allow_empty=True),
                             facts=start_facts, inherited=bool(previous_state), environment_anchor=scene["environment_anchor"],
                             composition=composition, reference_roles=scene["reference_roles"])
@@ -1361,6 +1503,7 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
                                                environment_anchor=scenes[-1].get("end_environment_anchor"),
                                                composition=scenes[-1].get("composition", ""), reference_roles=scenes[-1].get("reference_roles"))
     return {"status": "ready", "llm_released": True,
+            "story_quality_contract": "2026-11-02-dialogue-gesture-language-2",
             "scene_count": len(seconds), "scene_seconds": seconds,
             "seconds_per_scene": seconds[0] if len(set(seconds)) == 1 else None,
             "total_seconds": sum(seconds), "speech_mode": voice_mode,
@@ -1372,6 +1515,8 @@ def plan_sequence(script, durations, model_name, voice_mode, seed=42,
             "dialogue_assignment_repairs": dialogue_assignment_repairs,
             "dialogue_pacing": _dialogue_pacing_summary(scenes, seconds, outline_pacing),
             "environment_anchor": opening_environment,
+            "continuity": _text(raw, "continuity", allow_empty=True),
+            "constraints": _text(raw, "constraints", allow_empty=True),
             "dialogue_whitelist": dialogues, "dialogues_detected_from_source": extracted,
             "scenes": scenes, "structured_scenes": scenes,
             "final_image_prompt": final_image_prompt,

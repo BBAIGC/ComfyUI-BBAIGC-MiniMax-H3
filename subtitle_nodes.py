@@ -73,7 +73,7 @@ def _source(record):
     return video,data
 
 
-def _recognize(path,progress,language='自动'):
+def _recognize(path,progress,language='自动',scene_seconds=None):
     import av
     from .subtitle_timing import caption_lines
     model_dir=Path(folder_paths.models_dir)/'whisper'/'base'
@@ -90,6 +90,13 @@ def _recognize(path,progress,language='自动'):
             total_seconds=float(video.duration/av.time_base) if video.duration else None
             resampler=av.AudioResampler(format='fltp',layout='mono',rate=16000)
             chunks=[];count=0;offset=None;result=[]
+            # Independent shots can have long silent gaps. Keep recognition
+            # windows on real edit cuts so ASR cannot merge two speakers into
+            # one caption spanning both shots.
+            boundaries=[];running=0.0
+            for seconds in scene_seconds or []:
+                running+=float(seconds)
+                boundaries.append(running)
             media_start=float(video.start_time/av.time_base) if video.start_time is not None else 0.0
             def transcribe(audio,at):
                 if not len(audio) or float(np.sqrt(np.mean(audio*audio)))<0.002:return
@@ -111,9 +118,12 @@ def _recognize(path,progress,language='自动'):
                 if count and abs(at-(offset+count/16000))>0.08:
                     transcribe(np.concatenate(chunks),offset);chunks=[];count=0
                 if not count:offset=at
-                chunks.append(values);count+=len(values)
-                if count>=16000*30:
-                    transcribe(np.concatenate(chunks),offset);offset+=count/16000;chunks=[];count=0
+                while len(values):
+                    cut=next((point for point in boundaries if point>at+1/16000),None)
+                    take=min(len(values),max(1,round((cut-at)*16000))) if cut is not None else len(values)
+                    chunks.append(values[:take]);count+=take;at+=take/16000;values=values[take:]
+                    if count>=16000*30 or cut is not None and at>=cut-1/16000:
+                        transcribe(np.concatenate(chunks),offset);offset=at;chunks=[];count=0
             for frame in video.decode(audio=0):
                 from comfy import model_management as mm
                 mm.throw_exception_if_processing_interrupted()
@@ -177,7 +187,7 @@ class H3Subtitles:
             elif cache_matches and cached.get('timing_version')==TIMING_VERSION:
                 lines=validate_lines(cached['lines'],duration);timing_source=cached.get('timing_source',['word'])
             else:
-                recognized=caption_lines(_recognize(source,progress,识别语言),duration,source='word')
+                recognized=caption_lines(_recognize(source,progress,识别语言,manifest.get('scene_seconds')),duration,source='word')
                 timing_source=list(dict.fromkeys(row.get('timing_source','word') for row in recognized))
                 lines=validate_lines(recognized,duration)
             payload={'source_sha256':sha,'run_id':manifest['run_id'],'lines':lines,'width':w,'height':h,'duration':duration,'language':识别语言,

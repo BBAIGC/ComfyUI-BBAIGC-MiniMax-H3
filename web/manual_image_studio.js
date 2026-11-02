@@ -5,7 +5,7 @@ import { H3_STUDIO_VERSION } from "./version.js";
 
 const TYPE = "H3ManualImageStudio";
 const MAX_SHOTS = 100;
-const settingsNames = {"图像模型":"model","文本编码器":"clip","VAE":"vae","步数":"steps","CFG":"cfg","采样器":"sampler","调度器":"scheduler","去噪":"denoise","缓存设备":"cache_device","缓存精度":"cache_dtype","编码器设备":"clip_device"};
+const settingsNames = {"图像模型":"model","文本编码器":"clip","VAE":"vae","步数":"steps","CFG":"cfg","采样器":"sampler","调度器":"scheduler","去噪":"denoise","缓存设备":"cache_device","缓存精度":"cache_dtype","编码器设备":"clip_device","图像LoRA":"loras"};
 const PHASES = {loading:"加载模型",encoding:"编码参考图",sampling:"正在采样",decoding:"解码图片",completed:"已完成"};
 const STATES = {idle:"等待导入",pending:"等待生成",running:"生成中",completed:"已完成",failed:"失败",cancelled:"已取消",paused:"已暂停"};
 const el = (tag, text = "", className = "") => { const value=document.createElement(tag);value.textContent=text;if(className)value.className=className;return value; };
@@ -73,7 +73,7 @@ function setup(node){
     function validReferences(items){return(Array.isArray(items)?items:[]).filter(item=>item&&typeof item.filename==="string").map(item=>({id:item.id,filename:item.filename,subfolder:item.subfolder||"",type:item.type||"input"}));}
     function snapshotSettings(){
         const owner=source();const link=owner?.inputs?.find(input=>input.type==="H3_IMAGE_SETTINGS")?.link;const upstream=graphLink(node.graph,link);const configuration=upstream?node.graph.getNodeById(upstream.origin_id):null;
-        if(configuration){const settings={};for(const field of configuration.widgets||[]){const key=settingsNames[field.name];if(key)settings[key]=field.value;}if(Object.keys(settings).length)data.image_settings=settings;}
+        if(configuration){const settings={},cloud=configuration.widgets?.find(item=>item.name==='服务来源')?.value==='BBAPI',names=cloud?{'API配置名称':'profile','API接口地址':'base_url','API模型':'model','API分辨率':'resolution','API质量':'quality','分镜图长边':'storyboard_long_edge'}:settingsNames;if(cloud)settings.provider='bbapi';for(const field of configuration.widgets||[]){const key=names[field.name];if(key)settings[key]=field.value;}if(Object.keys(settings).length)data.image_settings=settings;}
         if(owner&&data.dimensions_source!=="manual"){const canvas=owner.properties?.h3_director_preview?.canvas;if(Number.isInteger(canvas?.width)&&Number.isInteger(canvas?.height)){data.width=canvas.width;data.height=canvas.height;data.dimensions_source="source";}}
     }
     function discoverSource(){
@@ -150,7 +150,7 @@ function setup(node){
         const targets=all?data.shots.filter(item=>!item.skip&&!item.retained&&!(item.candidates||[]).some(candidate=>!candidate.stale)):[row];
         if(!targets.length){note("全部分镜已有图片或已保留，无需重复生成。");return;}
         snapshotSettings();if(![data.width,data.height].every(value=>Number.isInteger(value)&&value>=64&&value<=2048&&value%32===0)){note("尚未得到工作台的实际画幅，请重新导入已规划的分镜或填写宽高。",true);return;}
-        for(const item of targets){if(!item.prompt.trim()||!item.references?.length){note(`${item.id}缺少提示词或参考图。`,true);return;}}
+        for(const item of targets){if(!item.prompt.trim()){note(`${item.id}缺少提示词。`,true);return;}}
         if(!all&&row.retained){note("本镜已保留，请先取消保留再生成。",true);return;}
         try{queueing=true;setIsolation(true);data.runSelection=targets.map(item=>item.id);data.regenerate=regenerate;data.stopAfterCurrent=false;data.request_id=crypto.randomUUID();save();render();note("正在提交独立生图任务…");const result=await app.queuePrompt(0,1);if(result===false)throw new Error("任务未提交，请查看ComfyUI错误提示。");busy=true;note("任务已提交，等待Image2.1开始。");}
         catch(error){busy=false;note(`提交失败：${error.message}`,true);}finally{queueing=false;render();}
@@ -185,7 +185,7 @@ function setup(node){
             if(busy)throw new Error("请先停止独立生图，再导入新的提示词。");
             if(!payload||!Array.isArray(payload.shots))throw new Error("导入的提示词格式无效。");
             if(data.sourceNodeId!=null&&String(data.sourceNodeId)!==String(payload.sourceNodeId)&&data.shots.length)throw new Error("此生图节点已绑定另一工作台，请新建生图节点。");
-            data.sourceNodeId=payload.sourceNodeId;node.properties.h3_manual_source_id=payload.sourceNodeId;data.source_mode="手动分镜图";lastSource=payload.sourceNodeId;
+            data.sourceNodeId=payload.sourceNodeId;node.properties.h3_manual_source_id=payload.sourceNodeId;data.source_mode=payload.sourceMode==='文生视频'?'文生视频':'手动分镜图';lastSource=payload.sourceNodeId;
             const refs=validReferences(payload.references);data.references=clone(refs);const chosenKeys=new Set(data.selectedReferenceKeys||[]);let selectedRefs=refs.filter(ref=>chosenKeys.has(refKey(ref)));if(!selectedRefs.length)selectedRefs=refs.slice(0,1);const existing=new Map(data.shots.map(row=>[row.id,row]));let count=0;
             for(const incoming of payload.shots){if(!incoming?.id||typeof incoming.prompt!=="string")continue;const previous=existing.get(incoming.id);if(!previous&&data.shots.length>=MAX_SHOTS)throw new Error("最多导入100个分镜。");const row=previous||{id:incoming.id,index:incoming.index,candidates:[],retained:false,status:"pending"};const changed=row.prompt!==incoming.prompt||JSON.stringify(row.references)!==JSON.stringify(selectedRefs);row.prompt=incoming.prompt;row.index=incoming.index;row.references=clone(selectedRefs);row.skip=false;if(changed)markEdited(row);if(!previous)data.shots.push(row);data.activeId=row.id;count++;}
             if(payload.width&&payload.height){data.width=payload.width;data.height=payload.height;data.dimensions_source="source";}if(payload.image_settings)data.image_settings=clone(payload.image_settings);snapshotSettings();save();render();note(`已导入 ${count} 个提示词，保存 ${selectedRefs.length} 张参考图。`);return count;
