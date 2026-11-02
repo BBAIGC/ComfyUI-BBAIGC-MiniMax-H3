@@ -95,7 +95,7 @@ class StoryQualityTests(unittest.TestCase):
         result = self.planner.compile_storyboard(raw, script='客人轻点头说谢谢', count=1,
             seconds=[6], dialogues=[line], voice_mode='自动识别原稿', input_mode='T2VA')
         self.assertEqual(result['scenes'][0]['dialogues'][0]['speaker_id'], 'S2')
-        self.assertIn('（S2）', result['compiled'][0]['prompt'])
+        self.assertIn('(S2)', result['compiled'][0]['prompt'])
 
     def test_cloud_text_storyboard_has_copyable_stills_and_exact_dialogue(self):
         script = "成年女主人坐在客厅，微笑说：‘下午好，请喝水。’随后客人轻轻点头，说：‘谢谢。’"

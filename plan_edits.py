@@ -290,6 +290,8 @@ def apply_plan_edits(plan, edits, *, input_mode=None):
         fields = _fields(result, index)
         anchors = _anchors(result, fields)
         if _STRUCTURE.intersection(values):
+            scene.pop("native_prompt_override", None)
+            scene.pop("video_text", None)
             line_ids = {item["id"] for item in scene.get("dialogues", [])}
             compile_scene = copy.deepcopy(scene)
             compile_scene["environment_anchor"], compile_scene["end_environment_anchor"] = environment, end_environment
@@ -314,6 +316,8 @@ def apply_plan_edits(plan, edits, *, input_mode=None):
             scene["video_text"] = values["video_text"]
         if "video_prompt" in values:
             supplied = _clean(values["video_prompt"])
+            scene["native_prompt_override"] = supplied
+            scene.pop("video_text", None)
             marker = re.compile(r"(?m)^(" + "|".join(H3_FIELDS) + r"):\s*")
             parts = list(marker.finditer(supplied))
             if parts:

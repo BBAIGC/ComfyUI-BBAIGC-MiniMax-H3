@@ -1,1 +1,1 @@
-export const H3_STUDIO_VERSION = "1.3.4";
+export const H3_STUDIO_VERSION = "1.3.5";

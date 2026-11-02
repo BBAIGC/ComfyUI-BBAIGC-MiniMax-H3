@@ -18,6 +18,8 @@ _PLAN_KEYS = {"status", "llm_released", "scene_count", "scene_seconds", "seconds
               "final_image_prompt", "generated_reference_ids", "compiled_prompts", "prompts", "continuity", "constraints"}
 _PLAN_KEYS.update({"prompt_format", "dialogue_pacing"})
 _PLAN_KEYS.add("input_mode")
+_PLAN_KEYS.add("prompt_compiler")
+_PLAN_KEYS.add("native_prompts_authoritative")
 _RUNTIME_KEYS = {"path", "filename", "subfolder", "run_id", "node_id", "image", "end_image", "video", "report",
                  "output_directory", "image_path", "end_image_path", "video_path", "tail_path", "final_path",
                  "generated_image_path", "repaired_image_path", "source_images", "effective_settings"}

@@ -27,10 +27,14 @@ def normalize_prompt_format(value=None):
 
 
 def video_prompt_for_format(prompt, value=None):
-    if normalize_prompt_format(value) != '工作台格式':
-        return prompt
-    return ''.join(part if part.startswith('<d>') else re.sub(r'(?<![A-Za-z0-9])S[1-9]\d*(?![A-Za-z0-9])', '该人物',re.sub(r'[（(]\s*S[1-9]\d*\s*[）)]', '', part))
-                   for part in re.split(r'(<d>.*?</d>)',str(prompt),flags=re.S))
+    normalize_prompt_format(value)
+    # Both editing views feed the same native H3 speaker protocol. Keep its
+    # stable IDs; only normalize their parentheses outside the verbatim speech.
+    return ''.join(
+        part if re.match(r'<d>', part, re.I) else re.sub(
+            r'[（(]\s*(S[1-9]\d*(?:\s*,\s*S[1-9]\d*)*)\s*[）)]',
+            lambda match: '(' + re.sub(r'\s+', '', match.group(1)) + ')', part)
+        for part in re.split(r'(<d>.*?</d>)', str(prompt), flags=re.S | re.I))
 
 
 def is_section_heading(line):

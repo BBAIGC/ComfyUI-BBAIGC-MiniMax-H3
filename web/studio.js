@@ -11,7 +11,7 @@ import {attachSpeechInput} from './speech_input.js';
 import {createImageSamplingControls} from './image_sampling_controls.js';
 import {createModelServices,createLoraSlots,createVideoFinishing,openModelServiceDialog} from './model_services.js';
 import {restoreLegacyTextVideoWeights,videoModelSummary} from './video_model_selection.js';
-import {videoPhaseView} from './video_phase.js';
+import {videoPhaseView,speechReviewView,speechReviewSummaryText} from './video_phase.js';
 import {rememberModelSchema,modelSchema,ensureModelWidgets,modelChoices} from './model_settings_compat.js';
 import {seedMode,setSeedMode,prepareH3Seed,currentH3Seed,setH3Seed,imageSeedMode,setImageSeedMode,currentH3ImageSeed,prepareH3ImageSeed,randomH3SceneSeed} from './h3_seed.js';
 
@@ -135,6 +135,7 @@ function installStyle() {
       .h3-studio .h3-scene-play[data-playing=true] {opacity:0;transition:opacity 140ms ease}
       .h3-studio .h3-scene-frame:hover .h3-scene-play[data-playing=true],.h3-studio .h3-scene-play:focus-visible {opacity:1}
       .h3-studio .h3-scene-row-status {font-size:12px;opacity:.75}
+      .h3-studio .h3-speech-review {color:#e7b750;opacity:1}
       .h3-studio .h3-time {display:inline-block;background:#f2cf55;color:#29230c;border:1px solid #d4b33b;border-radius:3px;padding:1px 5px;font-size:12px;line-height:1.5;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
       .h3-studio .h3-time[hidden] {display:none}
       .h3-studio .h3-time-row {display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0}
@@ -1981,6 +1982,8 @@ function setupStudio(node,nodeData) {
         const activePhase=videoPhaseView(sceneAt((snapshot?.scene_index||1)-1),snapshot,(snapshot?.scene_index||1)-1);
         const text = snapshot ? `${planningText || (activePhase.busy?activePhase.text:null) || STAGES[snapshot.stage] || STATUS[snapshot.status] || "处理中"}${snapshot.scene_index ? ` · 镜头${snapshot.scene_index} / ${sceneCount()}` : ""}${snapshot.error ? `：${snapshot.error}` : ""}` : "尚未开始";
         progressState.append(document.createTextNode(text));
+        const reviewSummary=speechReviewSummaryText(snapshot?.speech_review);
+        if(reviewSummary)progressState.append(el('span','h3-speech-review',` · ${reviewSummary}`));
         if (!videoURL && scene) {
             renderVideoPlaceholder(scene);
         }
@@ -2132,7 +2135,9 @@ function setupStudio(node,nodeData) {
         for(let index=0;index<count;index++){
             const scene=sceneAt(index),view=allSceneRows.get(index)||createSceneRow(index);
             const seconds=displayedDuration(index);view.title.textContent=`镜头${index+1}${seconds?` · ${seconds}秒`:""}${scene?.input_mode?` · ${scene.input_mode==='T2VA'?'文生':'图生'}`:''}`;
-            const status=snapshot?.video_settings_changed&&!["running","generating"].includes(snapshot.status)?"视频待重做":STATUS[scene?.status]||scene?.status||"等待中";view.status.textContent=status;
+            const review=scene?.video?speechReviewView(scene.speech_review):{text:'',title:''};
+            const status=snapshot?.video_settings_changed&&!["running","generating"].includes(snapshot.status)?"视频待重做":review.text||STATUS[scene?.status]||scene?.status||"等待中";view.status.textContent=status;
+            view.status.title=review.title;view.status.classList.toggle('h3-speech-review',!!review.text);
             renderSceneTimings(index,view);
             const manual=isManualMode(),manualImage=storyboardImage(index);let first=imageEditingMode()?manualImage:scene?.image;
             const reference=index=>{const ref=references[index];if(!ref)return null;const parts=ref.filename.replaceAll("\\","/").split("/");return{filename:parts.pop(),subfolder:parts.join("/"),type:"input"};};

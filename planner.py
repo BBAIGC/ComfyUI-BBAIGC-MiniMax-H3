@@ -860,16 +860,29 @@ def compile_storyboard(raw, *, script, count, seconds, dialogues, voice_mode,
             # it literally after the tagged utterance; keep it in the editable
             # plan without appending it to the native speech instruction.
             if line["offscreen"]:
-                phrase = f"第{start:g}至{end:g}秒，{speaker}（{speaker_id}）以画外音说：{words}。"
+                phrase = f"第{start:g}至{end:g}秒，{speaker}({speaker_id})以画外音说：{words}。"
             else:
-                phrase = (f"第{start:g}至{end:g}秒，画面中可见的{speaker}（{speaker_id}）现场说：{words}。"
+                phrase = (f"第{start:g}至{end:g}秒，画面中可见的{speaker}({speaker_id})现场说：{words}。"
                           "说话人的嘴唇和下颌随着这些原话自然发音，表情与声音同步。"
                           "声音来自画面中的此人，不是画外旁白或背景人声。")
             speech.append(phrase)
             observed.append(identifier)
         if speech:
             body += " " + " ".join(speech)
-            ambience += " 环境音低于指定对白，不加入其他人声。"
+            # A short line leaves most of an AV clip unconstrained. Bound the
+            # complementary intervals as well, including the SAME speaker;
+            # forbidding only "other voices" did not exclude ad-libbing.
+            quiet, cursor = [], 0.0
+            for start, end in sorted(spans):
+                if start > cursor:
+                    quiet.append((cursor, start))
+                cursor = end
+            if cursor < seconds[index]:
+                quiet.append((cursor, seconds[index]))
+            if quiet:
+                windows = "、".join(f"第{start:g}至{end:g}秒" for start, end in quiet)
+                body += f" {windows}，所有人保持安静，只听见环境音，画面人物嘴唇自然闭合。"
+            ambience += " 人声仅为上述时段内的指定原句；其他时段只有环境音，所有说话人保持安静。"
         else:
             body += " 本镜人物不说话。"
             ambience += " 不加入人声、旁白、歌唱或额外发声。"

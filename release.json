@@ -1,12 +1,12 @@
 {
   "id": "h3",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "author": "BBAIGC",
   "workflow": "workflows/BBAIGC_h3.json",
-  "sha256": "abe8e84c3c10e282c5493ec6ef0c4d550bf632ad5a53baf2b2314952b1493823",
+  "sha256": "4783479b208bd9019c2744942a0203d422e23898009a09ab162644c21b127fe3",
   "node_versions": {
-    "core": "1.3.4",
+    "core": "1.3.5",
     "bbapi": "1.1.6"
   },
-  "notes": "文生视频请求不再误声明存在身份参考图，按实际输入传递参考图可用状态。"
+  "notes": "保留原生说话人编号与安静时段；保留计划刷新编译规则；生成后CPU对白复核并提示疑似异常。"
 }

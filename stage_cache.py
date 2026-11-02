@@ -56,7 +56,9 @@ def stage_fingerprints(kwargs, references, durations, *, image_settings, width, 
                  'width': width, 'height': height, 'aspect': kwargs.get('画幅'),
                  'resolution': kwargs.get('生成档位')}
     image_hash = _digest(image)
+    from .plan_compile import prompt_compiler_identity
     video = {"image": image_hash, "settings": {key: kwargs.get(key) for key in VIDEO_KEYS},
+             "prompt_compiler": prompt_compiler_identity(),
              "implementation": _implementation_identities(("shot_nodes.py", "native_nodes.py"))}
     if kwargs.get("视频LoRA"):
         video["settings"]["视频LoRA"] = kwargs["视频LoRA"]

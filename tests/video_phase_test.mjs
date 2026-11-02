@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {videoPhaseView} from '../web/video_phase.js';
+import {videoPhaseView,speechReviewView,speechReviewSummaryText} from '../web/video_phase.js';
 const run={status:'running',scene_index:1};
 const scene={status:'生成中',video_progress:{phase:'sampling',started_at:100,value:8,total:8}};
 assert.equal(videoPhaseView(scene,run,0,105).text,'视频采样 · 8/8 · 100% · 5秒');
@@ -10,4 +10,11 @@ assert.equal(videoPhaseView(scene,run,0,112).text,'解码视频画面 · 2秒');
 assert.equal(videoPhaseView({status:'等待'},run,1).busy,false);
 assert.equal(videoPhaseView({...scene,video:{filename:'done.mp4'}},run,0).busy,false);
 assert.equal(videoPhaseView(scene,{...run,status:'completed'},0).busy,false);
+scene.video_progress={phase:'audio_review',started_at:110};
+assert.equal(videoPhaseView(scene,run,0,112).text,'复核对白 · 2秒');
+assert.equal(speechReviewView({status:'matched'}).text,'');
+assert.equal(speechReviewView({status:'unavailable',error:'缺少本机识别模型'}).title,'缺少本机识别模型');
+const review=speechReviewView({status:'needs_review',expected:['请喝水。'],recognized:'额外人声，请喝水。'});
+assert.equal(review.text,'对白待复核');assert.match(review.title,/额外人声，请喝水/);
+assert.equal(speechReviewSummaryText({needs_review:[2],unavailable:[3]}),'镜头2对白待复核；镜头3对白未复核');
 console.log('PASS: actual sampler fraction, phase reset, waiting and completed preview states');

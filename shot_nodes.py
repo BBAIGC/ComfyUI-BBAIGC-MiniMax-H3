@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import os
+import re
 from pathlib import Path
 import time
 import uuid
@@ -425,6 +426,14 @@ class H3GenerateShot:
                 notify_video_phase(bundle, 'audio_decoding')
                 raw_audio = None if silent or using_dialogue else _outputs(VAEDecodeAudio.execute(bundle["audio_vae"], original_samples))[0]
                 audio = _audio_for_export(guided_audio if using_dialogue else raw_audio, target_frames, silent)
+                speech_review = None
+                if not silent and not using_dialogue:
+                    from .speech_review import review_model_audio
+                    notify_video_phase(bundle, 'audio_review')
+                    expected_words = [re.sub(r'^\s*\[[^\]]+\]\s*', '', line)
+                                      for line in re.findall(r'<d>(.*?)</d>', str(prompt), flags=re.S)]
+                    speech_review = review_model_audio(audio, expected_words)
+                    mm.throw_exception_if_processing_interrupted()
                 local.update(frames=frames, raw_audio=raw_audio, audio=audio)
                 unencoded = _outputs(CreateVideo.execute(
                     images=frames, fps=float(FPS), audio=audio, bit_depth=8,
@@ -463,6 +472,7 @@ class H3GenerateShot:
                 "sigma_shift_video": bundle.get("sigma_shift_video", 12.0),
                 "sigma_shift_audio": bundle.get("sigma_shift_audio", 3.0),
                 "audio_mode": "对白音轨" if using_dialogue else "静音" if silent else "模型音频",
+                "speech_review": speech_review,
                 "dialogue_offset_seconds": bundle.get("_dialogue_offset_seconds", 0.0) if using_dialogue else None,
                 "dialogue_source_seconds": dialogue_track.get("seconds") if using_dialogue else None,
                 "dialogue_padded_seconds": round(max(0.0, actual_seconds - max(0.0, dialogue_track["seconds"] - bundle.get("_dialogue_offset_seconds", 0.0))), 6) if using_dialogue else None,

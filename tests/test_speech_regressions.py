@@ -24,6 +24,7 @@ class SpeechRegressionTests(unittest.TestCase):
         self.modules.start()
         self.planner = importlib.import_module(package.__name__ + '.planner')
         self.motion = importlib.import_module(package.__name__ + '.motion_continuity')
+        self.formats = importlib.import_module(package.__name__ + '.prompt_formats')
 
     def tearDown(self):
         self.modules.stop()
@@ -36,6 +37,22 @@ class SpeechRegressionTests(unittest.TestCase):
         self.assertEqual(self.motion.finite_gesture_timing(action, '先摘帽，再递杯。', 10.5), action)
         cup = '坐着将杯子放在桌面，右手放回膝上。'
         self.assertEqual(self.motion.finite_gesture_timing(cup, cup, 8), cup)
+
+    def test_editing_format_preserves_native_speaker_identity_and_exact_words(self):
+        prompt = ('成年朋友（S1）说：<d>[Chinese] 请喝水，编号（S1）保持原样。</d> '
+                  '另一人(S2)回应，S1仍在桌前。')
+        expected = ('成年朋友(S1)说：<d>[Chinese] 请喝水，编号（S1）保持原样。</d> '
+                    '另一人(S2)回应，S1仍在桌前。')
+        for view in self.formats.PROMPT_FORMATS:
+            with self.subTest(view=view):
+                self.assertEqual(self.formats.video_prompt_for_format(prompt, view), expected)
+
+    def test_native_compound_speakers_survive_format_selection(self):
+        prompt = '两人（ S1, S2 ）一起说：<d>[Chinese] 下午好。</d>'
+        for view in self.formats.PROMPT_FORMATS:
+            with self.subTest(view=view):
+                self.assertEqual(self.formats.video_prompt_for_format(prompt, view),
+                                 '两人(S1,S2)一起说：<d>[Chinese] 下午好。</d>')
 
     def test_only_a_source_requested_single_gesture_gets_a_clock(self):
         self.assertEqual(self.motion.finite_gesture_timing('轻轻点头。', '人物安静坐着。', 8), '轻轻点头。')
@@ -79,6 +96,26 @@ class SpeechRegressionTests(unittest.TestCase):
         self.assertIn('固定机位', body)
         self.assertNotIn('温和亲切，嘴唇自然开合', body)
         self.assertEqual(result['scenes'][0]['dialogues'][0]['delivery'], '温和亲切，嘴唇自然开合')
+
+    def test_dialogue_gaps_include_same_speaker_silence_without_changing_lines(self):
+        script = '人物说“下午好。”随后说“请喝水。”'
+        lines = self.planner.extract_dialogue(script)
+        scene = {'visual': '人物坐在桌边。', 'action': '人物递出杯子。',
+            'soundscape': '杯子移动的轻响。', 'music': 'N/A',
+            'dialogues': [dict(id=line['id'], speaker_id='S1', speaker_description='人物',
+                delivery='自然', start=start, end=end)
+                for line, start, end in zip(lines, (1, 3), (2, 4))]}
+        result = self.planner.compile_storyboard({'continuity': '', 'constraints': '', 'scenes': [scene]},
+            script=script, count=1, seconds=[5.5], dialogues=lines,
+            voice_mode='自动识别原稿', input_mode='I2V')
+        fields = result['compiled'][0]['fields']
+        body = fields['integrated_multimodal_description']
+        self.assertIn('第0至1秒、第2至3秒、第4至5.5秒，所有人保持安静', body)
+        self.assertEqual(body.count('(S1)'), 2)
+        self.assertEqual(body.count('<d>'), 2)
+        self.assertIn('<d>[Chinese] 下午好。</d>', body)
+        self.assertIn('<d>[Chinese] 请喝水。</d>', body)
+        self.assertIn('所有说话人保持安静', fields['overall_soundscape'])
 
     def test_planner_field_rules_survive_custom_presets(self):
         system, _, schema = self.planner.planning_request('人物说“下午好。”', 1, [8],

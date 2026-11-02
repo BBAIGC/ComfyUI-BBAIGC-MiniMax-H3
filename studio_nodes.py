@@ -520,8 +520,10 @@ def _snapshot_event(manifest,node_id):
     event = {key: manifest.get(key) for key in
              ("run_id", "status", "stage", "scene_index", "scene_count", "mode", "final_video", "error", "failure_context", "optimized_script", "effective_settings", "image_jobs", "image_summary", "timings", "output_directory", "plan_available", "plan_reused", "revision", "regeneration_applied", "duration_mode", "timing_mode", "scene_seconds", "total_seconds", "allocation_receipt", "manual_missing", "image_edit_receipts")}
     event.update(node_id=str(node_id), scenes=[{key: scene.get(key) for key in
-                 ("index", "status", "image", "end_image", "video", "prompt", "display_prompt", "image_prompt", "seconds", "error", "video_timing", "video_seed", "plan_fields", "reference_labels", "spoken_dialogues", "input_mode")}
+                 ("index", "status", "image", "end_image", "video", "prompt", "display_prompt", "image_prompt", "seconds", "error", "video_timing", "video_seed", "plan_fields", "reference_labels", "spoken_dialogues", "input_mode", "speech_review")}
                  for scene in manifest.get("scenes", [])])
+    from .speech_review import summarize_reviews
+    event['speech_review'] = summarize_reviews(manifest.get('scenes', []))
     event['planning_progress'] = manifest.get('planning_progress')
     event['video_progress'] = manifest.get('video_progress')
     for item, scene in zip(event['scenes'], manifest.get('scenes', [])):
@@ -1408,13 +1410,23 @@ class H3StoryboardStudio:
                             allocation_receipt=plan.get("allocation_receipt"))
             for scene, seconds in zip(manifest["scenes"], durations):
                 scene["seconds"] = seconds
+            from .plan_compile import refresh_plan_compilation
+            plan, compilation_receipt = refresh_plan_compilation(
+                plan, saved_edits=manifest.get("plan_edits"),
+                preserve_legacy_native=bool(manifest.get("plan_imported")))
+            manifest["plan"] = plan
+            if manifest.get("base_plan"):
+                manifest["base_plan"], _ = refresh_plan_compilation(
+                    manifest["base_plan"], preserve_legacy_native=bool(manifest.get("plan_imported")))
+            if compilation_receipt:
+                manifest["plan_compilation_receipt"] = compilation_receipt
             manifest.setdefault("base_plan", copy.deepcopy(plan))
-            plan_changed = False
+            plan_changed = bool(compilation_receipt and compilation_receipt["prompts_changed"])
             if has_edit_request:
                 from .plan_edits import normalize_plan_edits, apply_plan_edits
                 edits = normalize_plan_edits(edit_raw, len(durations))
                 edited = apply_plan_edits(manifest["base_plan"], edits)
-                plan_changed = edited != plan
+                plan_changed = plan_changed or edited != plan
                 plan = edited
                 manifest["plan"] = edited
                 manifest["plan_edits"] = edits
@@ -1860,7 +1872,8 @@ class H3StoryboardStudio:
                 tail_path = _revision_path(run_dir, f"末帧_{i + 1:03d}.png", manifest)
                 _save_image(last_frame, tail_path)
                 video = last_frame = selected = None
-                scene.update(status="完成", video_path=str(destination), video=_preview(destination), tail_path=str(tail_path), report=report)
+                scene.update(status="完成", video_path=str(destination), video=_preview(destination), tail_path=str(tail_path), report=report,
+                             speech_review=report.get('speech_review'))
                 scene.pop('video_progress', None)
                 manifest.pop('video_progress', None)
                 timings.finish(scene["video_timing"])
