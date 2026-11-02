@@ -214,9 +214,20 @@ function focusWorkspace(graph) {
   app.canvas.setDirty(true, true);
 }
 
+function installDesktopMcpIcon() {
+  if (document.getElementById('bbaigc-desktop-mcp-icon')) return;
+  const style = document.createElement('style');
+  style.id = 'bbaigc-desktop-mcp-icon';
+  // Desktop injects this Iconify class, but recent frontends do not ship its
+  // CSS. A scoped mask keeps the original button, tooltip and click handler.
+  const icon = 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27black%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpath d=%27M12 22v-5M9 8V2M15 8V2M7 8h10v3a5 5 0 0 1-10 0Z%27/%3E%3C/svg%3E")';
+  style.textContent = `#comfy-desktop-mcp-btn .side-bar-button-icon{display:inline-block;width:20px;height:20px;flex:none;background-color:currentColor;-webkit-mask:${icon} center/contain no-repeat;mask:${icon} center/contain no-repeat}`;
+  document.head.append(style);
+}
+
 app.registerExtension({
   name: 'BBAIGC.Nodes2DOMCompatibility',
-  setup: installControlScrolling,
+  setup() { installControlScrolling(); installDesktopMcpIcon(); },
   afterConfigureGraph() {
     const graph = app.graph;
     // Native loading restores the saved camera after configuration callbacks.
