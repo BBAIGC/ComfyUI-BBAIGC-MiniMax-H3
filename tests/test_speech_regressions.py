@@ -1,5 +1,6 @@
 """A real leaked-planner prompt must not become untimed speech guidance."""
 import importlib
+import json
 from pathlib import Path
 import sys
 import threading
@@ -85,6 +86,13 @@ class SpeechRegressionTests(unittest.TestCase):
         self.assertIn('constraints只写原剧本', system)
         self.assertIn('不能增加text或自拟台词', system)
         self.assertFalse(schema['properties']['scenes']['items']['properties']['dialogues']['items']['additionalProperties'])
+
+    def test_planner_is_not_told_a_text_only_job_has_reference_images(self):
+        for available in (False, True):
+            with self.subTest(has_reference=available):
+                _, request, _ = self.planner.planning_request('人物安静坐着。', 1, [8], [], '静音',
+                                                             has_reference=available)
+                self.assertIs(json.loads(request)['reference_image_is_identity_anchor'], available)
 
     def test_final_renderer_cannot_add_an_utterance(self):
         script = '人物坐在桌前，说“下午好。”'

@@ -1,12 +1,12 @@
 {
   "id": "h3",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "author": "BBAIGC",
   "workflow": "workflows/BBAIGC_h3.json",
-  "sha256": "328b32321d7a95ff24145c01b8993ed9b4292487b5f2e5c9bb86f5143e926c66",
+  "sha256": "abe8e84c3c10e282c5493ec6ef0c4d550bf632ad5a53baf2b2314952b1493823",
   "node_versions": {
-    "core": "1.3.3",
+    "core": "1.3.4",
     "bbapi": "1.1.6"
   },
-  "notes": "加强规划字段边界与最终对白校验：自然限制、请求参数、对白ID和发声方式分开，原生提示词生成后再次比对原剧本已确认台词；新增台词直接报错。"
+  "notes": "文生视频请求不再误声明存在身份参考图，按实际输入传递参考图可用状态。"
 }
