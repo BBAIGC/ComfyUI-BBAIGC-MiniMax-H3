@@ -18,7 +18,7 @@ ComfyUI 应使用支持这些模型的版本；作者现有核心为 0.43.0、�
 | `minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors` | 1.956 GB | `models/loras/` | 可选官方 4 步加速 |
 | `minimax_h3_ref2va_pruned_int8_convrot.safetensors` | 20.970 GB | `models/diffusion_models/` | 可选参考视频路线 |
 
-基础四件套约 40.07 GB，加入一份加速 LoRA 约 42.03 GB。磁盘还需为 Ollama、临时视频、输出及内存卸载保留空间。不要把总磁盘大小当作显存要求。作者自用的 mystic07 RefDelta Turbo8 融合权重约 20.980 GB，当前未核实稳定公开下载地址，不作为开箱默认必需项。公开默认使用基础模型与官方加速 LoRA。
+基础四件套约 40.07 GB，加入一份加速 LoRA 约 42.03 GB。磁盘还需为 Ollama、临时视频、输出及内存卸载保留空间。不要把总磁盘大小当作显存要求。公开默认使用基础模型与官方加速 LoRA。
 
 ```powershell
 $ComfyRoot = '你的ComfyUI路径'
@@ -45,7 +45,7 @@ NVFP4 编码器为本机 Blackwell 环境的选型；其他 NVIDIA 架构应核�
 
 ## 性能参考
 
-**以下是作者提供的暂估，尚未按固定参数实测：加速方案生成约 1 分钟视频，大约 30 多分钟；未加速方案生成约 15 秒视频，大约 13 分钟。** 两项不是同一参数下的对照测试，不能按比例外推。最终耗时还取决于分镜数、分辨率、步数、参考图和音轨；后续以固定参数实测替换。
+**经验耗时参考：加速方案生成约1分钟视频，大约30多分钟；常规方案生成约15秒视频，大约13分钟。** 两项参数不同，不能作为同条件性能对比或按比例外推。实际耗时取决于分镜数、分辨率、步数、参考图和音轨。
 
 共享语音输入节点按需使用 SenseVoice。已有权重可设置 `BBAIGC_SENSEVOICE_MODEL_DIR`；兼容旧变量 `CODEX_SENSEVOICE_MODEL_DIR`，新变量优先。目录应包含 `model.onnx`、`config.yaml`、`tokens.json`、`am.mvn`，模型来源为 [kautism/SenseVoiceSmall-onnx](https://huggingface.co/kautism/SenseVoiceSmall-onnx)。
 
